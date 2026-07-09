@@ -6,9 +6,9 @@ const { UsageMonitor } = require('./lib/usage-monitor');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
-let overlay = null;
-let overlayReady = false;
-let pendingOverlayMessages = [];
+// One overlay window per display, keyed by Electron's display.id.
+// Each entry: { win: BrowserWindow, ready: boolean, pending: [{channel, payload}] }
+let overlays = new Map();
 let monitor = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 
@@ -37,7 +37,7 @@ function rebuildTrayMenu() {
       { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
       { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
       { type: 'separator' },
-      { label: 'Make It Rain (test)', click: () => sendToOverlay('rain') },
+      { label: 'Make It Rain (test)', click: () => rainAllDisplays() },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
@@ -63,10 +63,27 @@ function trayAnchor() {
   return { x: bounds.x + bounds.width - 40, y: bounds.y, width: 20, height: 22 };
 }
 
-// ── Overlay window ──────────────────────────────────────────────────────────
-function createOverlay() {
-  const { bounds } = screen.getPrimaryDisplay();
-  overlay = new BrowserWindow({
+// ── Overlay windows (one per display) ───────────────────────────────────────
+// Marks the window so it floats above everything — including full-screen apps
+// and other Spaces — and never steals focus or clicks.
+function makeOverlayFloat(win) {
+  // 'screen-saver' is the highest standard level, above full-screen apps.
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setIgnoreMouseEvents(true);
+  if (process.platform === 'darwin') {
+    // Show on every Space and over full-screen apps rather than only the
+    // Space that happens to be focused.
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+}
+
+// Create (or return the existing) overlay window for a given display.
+function createOverlayForDisplay(display) {
+  const existing = overlays.get(display.id);
+  if (existing) return existing;
+
+  const { bounds } = display;
+  const win = new BrowserWindow({
     x: bounds.x, y: bounds.y,
     width: bounds.width, height: bounds.height,
     transparent: true,
@@ -81,51 +98,97 @@ function createOverlay() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  overlay.setAlwaysOnTop(true, 'screen-saver');
-  overlay.setIgnoreMouseEvents(true);
-  if (process.platform === 'darwin') {
-    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  }
-  overlayReady = false;
-  overlay.loadFile('overlay.html');
-  overlay.webContents.on('did-finish-load', () => {
-    overlayReady = true;
-    flushOverlayMessages();
+  makeOverlayFloat(win);
+
+  const entry = { win, ready: false, pending: [] };
+  overlays.set(display.id, entry);
+
+  win.loadFile('overlay.html');
+  win.webContents.on('did-finish-load', () => {
+    entry.ready = true;
+    flushOverlay(entry);
   });
-  overlay.on('closed', () => {
-    overlay = null;
-    overlayReady = false;
-    pendingOverlayMessages = [];
-  });
+  win.on('closed', () => { overlays.delete(display.id); });
+  return entry;
 }
 
-function sendToOverlay(channel, payload) {
-  if (!overlay) createOverlay();
-  pendingOverlayMessages.push({ channel, payload });
-  if (overlayReady) flushOverlayMessages();
+// Ensure every current display has an overlay window.
+function ensureOverlays() {
+  for (const display of screen.getAllDisplays()) createOverlayForDisplay(display);
 }
 
-function flushOverlayMessages() {
-  if (!overlay || !overlayReady) return;
-  if (!overlay.isVisible()) overlay.showInactive();
-  for (const { channel, payload } of pendingOverlayMessages) {
-    overlay.webContents.send(channel, payload);
+// The overlay covering the primary display (used by the test screenshot hook).
+function primaryOverlayWin() {
+  const entry = overlays.get(screen.getPrimaryDisplay().id);
+  return entry ? entry.win : null;
+}
+
+// Queue a message for one overlay, flushing immediately if it's ready.
+function queueToOverlay(entry, channel, payload) {
+  entry.pending.push({ channel, payload });
+  if (entry.ready) flushOverlay(entry);
+}
+
+function flushOverlay(entry) {
+  if (!entry.ready) return;
+  // showInactive() reveals the window without stealing focus from the
+  // foreground app, so the animation plays even when we're not focused.
+  if (!entry.win.isVisible()) entry.win.showInactive();
+  // Re-assert the float level in case the window was recreated or the OS
+  // demoted it while hidden.
+  makeOverlayFloat(entry.win);
+  for (const { channel, payload } of entry.pending) {
+    entry.win.webContents.send(channel, payload);
   }
-  pendingOverlayMessages = [];
+  entry.pending = [];
 }
 
-ipcMain.on('overlay-idle', () => {
-  if (overlay && pendingOverlayMessages.length === 0) overlay.hide();
+// Rain plays everywhere.
+function rainAllDisplays() {
+  ensureOverlays();
+  for (const entry of overlays.values()) queueToOverlay(entry, 'rain');
+}
+
+// Dollar-fly plays on whichever display holds the tray anchor. The anchor
+// arrives in global screen coordinates; convert to that display's local space.
+function flyBillsFromTray(count) {
+  ensureOverlays();
+  const a = trayAnchor();
+  const center = {
+    x: a.x + Math.floor(a.width / 2),
+    y: a.y + Math.floor(a.height / 2),
+  };
+  const display = screen.getDisplayNearestPoint(center);
+  const entry = createOverlayForDisplay(display);
+  const { bounds } = display;
+  const anchor = { x: a.x - bounds.x, y: a.y - bounds.y, width: a.width, height: a.height };
+  queueToOverlay(entry, 'fly-bills', { count, anchor });
+}
+
+// A renderer reports it went idle; hide only that window (if nothing's queued).
+ipcMain.on('overlay-idle', (event) => {
+  for (const entry of overlays.values()) {
+    if (entry.win.webContents === event.sender) {
+      if (entry.pending.length === 0) entry.win.hide();
+      break;
+    }
+  }
 });
 
-// ── Monitor wiring ──────────────────────────────────────────────────────────
-function overlayAnchorFromTray() {
-  // Convert global screen coords to overlay-window-local coords.
-  const { bounds } = screen.getPrimaryDisplay();
-  const a = trayAnchor();
-  return { x: a.x - bounds.x, y: a.y - bounds.y, width: a.width, height: a.height };
+// Keep overlays in sync with the physical display layout.
+function watchDisplays() {
+  screen.on('display-added', (_e, display) => createOverlayForDisplay(display));
+  screen.on('display-removed', (_e, display) => {
+    const entry = overlays.get(display.id);
+    if (entry) { entry.win.destroy(); overlays.delete(display.id); }
+  });
+  screen.on('display-metrics-changed', (_e, display) => {
+    const entry = overlays.get(display.id);
+    if (entry) entry.win.setBounds(display.bounds);
+  });
 }
 
+// ── Monitor wiring ──────────────────────────────────────────────────────────
 function handleUpdate(previousTotal, snapshot) {
   applySnapshot(snapshot);
 
@@ -134,14 +197,14 @@ function handleUpdate(previousTotal, snapshot) {
   // Dollar-fly: number of whole-dollar boundaries crossed since the last update.
   const dollarsGained = Math.floor(newTotal) - Math.floor(previousTotal);
   if (dollarsGained > 0) {
-    sendToOverlay('fly-bills', { count: dollarsGained, anchor: overlayAnchorFromTray() });
+    flyBillsFromTray(dollarsGained);
   }
 
   // $100-rain: trigger if we crossed at least one multiple of 100.
   const previousHundreds = Math.floor(previousTotal / 100);
   const newHundreds = Math.floor(newTotal / 100);
   if (newHundreds > previousHundreds && newTotal >= 100) {
-    sendToOverlay('rain');
+    rainAllDisplays();
   }
 }
 
@@ -156,6 +219,11 @@ if (!app.requestSingleInstanceLock()) {
     tray = new Tray(getTrayIcon());
     applySnapshot(latestSnapshot);
 
+    // Create overlays up front so they're loaded and ready to show instantly,
+    // and keep them in sync as displays come and go.
+    ensureOverlays();
+    watchDisplays();
+
     monitor = new UsageMonitor();
     monitor.onInitialScanComplete = (snapshot) => {
       console.log(
@@ -169,12 +237,14 @@ if (!app.requestSingleInstanceLock()) {
     //   MIR_TEST_RAIN=1  triggers the rain animation after 1.5s
     //   MIR_TEST_SHOT=/path.png  captures the overlay to a PNG a few seconds later
     if (process.env.MIR_TEST_RAIN === '1') {
-      setTimeout(() => sendToOverlay('rain'), 1500);
+      setTimeout(() => rainAllDisplays(), 1500);
     }
     if (process.env.MIR_TEST_SHOT) {
       setTimeout(async () => {
         try {
-          const image = await overlay.webContents.capturePage();
+          const win = primaryOverlayWin();
+          if (!win) throw new Error('no primary overlay window');
+          const image = await win.webContents.capturePage();
           require('fs').writeFileSync(process.env.MIR_TEST_SHOT, image.toPNG());
           console.log(`MakeItRain: overlay screenshot saved to ${process.env.MIR_TEST_SHOT}`);
         } catch (err) {
