@@ -10,8 +10,9 @@ on:
 # Comments track the human-readable version; bump the SHA + comment together
 # (Dependabot does this automatically).
 jobs:
-  # Full suite (app + leaderboard server). The server uses node:sqlite, which is
-  # a Node 22.5+ builtin, so the full suite only runs on 22+.
+  # Full suite (app + leaderboard server) across all supported platforms and
+  # Node versions. The app and server both require Node 22+ (the server uses the
+  # node:sqlite builtin, added in 22.5), matching package.json engines.
   test:
     name: test (node ${{ matrix.node }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -33,26 +34,6 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  # The published app supports Node 18+ (it never touches node:sqlite), so prove
-  # the app test suite still runs on the older baseline the README advertises.
-  test-app-legacy:
-    name: test:app (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [18, 20]
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm run test:app
-
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -62,7 +43,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run lint

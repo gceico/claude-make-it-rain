@@ -96,9 +96,9 @@ durable, queryable state. Daily reset + prune keeps it a fun *of-the-day* board
 and bounds storage.
 
 **Tradeoffs / accepted risks.** `node:sqlite` is only available on **Node ≥ 22**
-(it did not exist in Node 18/20). The server therefore requires Node ≥ 22 even
-though the desktop app runs on Node 18+. Yesterday's data is discarded — this is
-intentional, not an archive.
+(it did not exist in Node 18/20). The server therefore requires Node ≥ 22, and
+the desktop app now shares that baseline (Node 18 and 20 are both end-of-life).
+Yesterday's data is discarded — this is intentional, not an archive.
 
 **Status.** Shipped.
 

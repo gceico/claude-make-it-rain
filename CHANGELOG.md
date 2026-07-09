@@ -15,9 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Clarified Node.js support: the desktop app requires Node 18+, while the
-  leaderboard server requires Node 22+ (it uses the `node:sqlite` builtin). CI
-  runs the full suite on 22/24 and the app-only suite on 18/20.
+- Raised the minimum Node.js version to 22 for both the desktop app and the
+  leaderboard server, dropping end-of-life Node 18 and 20. CI now runs the full
+  suite on Node 22/24 across Linux, macOS, and Windows.
 
 ### Fixed
 
