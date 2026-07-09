@@ -3,6 +3,8 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
 const path = require('path');
 const { UsageMonitor } = require('./lib/usage-monitor');
+const { Config } = require('./lib/config');
+const denominations = require('./lib/denominations');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -10,6 +12,7 @@ let overlay = null;
 let overlayReady = false;
 let pendingOverlayMessages = [];
 let monitor = null;
+let config = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 
 // 16x16 green square fallback for platforms without tray title text (win/linux).
@@ -32,15 +35,33 @@ function formatTitle(total) {
 
 function rebuildTrayMenu() {
   const s = latestSnapshot;
+  const muted = config ? !!config.get('muted') : false;
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
       { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
       { type: 'separator' },
+      {
+        label: 'See your wealth',
+        submenu: [
+          { label: denominations.format(s.totalCostUSD), enabled: false },
+          { type: 'separator' },
+          { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
+        ],
+      },
+      { type: 'separator' },
       { label: 'Make It Rain (test)', click: () => sendToOverlay('rain') },
+      { label: 'Mute sounds', type: 'checkbox', checked: muted, click: (item) => setMuted(item.checked) },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
+}
+
+function setMuted(muted) {
+  if (config) config.set('muted', muted);
+  // Update the live overlay if one exists; don't spawn it just to toggle mute.
+  if (overlay && overlayReady) overlay.webContents.send('set-muted', muted);
+  rebuildTrayMenu();
 }
 
 function applySnapshot(snapshot) {
@@ -79,6 +100,10 @@ function createOverlay() {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      // The overlay is non-focusable and never receives a user gesture, so the
+      // default autoplay policy would leave its AudioContext suspended. Allow
+      // sound without a gesture (the renderer also resumes defensively).
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -90,6 +115,8 @@ function createOverlay() {
   overlay.loadFile('overlay.html');
   overlay.webContents.on('did-finish-load', () => {
     overlayReady = true;
+    // Sync the persisted mute preference every time the overlay is (re)created.
+    overlay.webContents.send('set-muted', config ? !!config.get('muted') : false);
     flushOverlayMessages();
   });
   overlay.on('closed', () => {
@@ -152,6 +179,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+
+    config = new Config(path.join(app.getPath('userData'), 'config.json'));
 
     tray = new Tray(getTrayIcon());
     applySnapshot(latestSnapshot);
