@@ -5,14 +5,11 @@
 
 ![Make It Rain in action](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/make-it-rain.gif)
 
-A satirical tray/menu bar app that watches your Claude Code session logs and
-shows an estimated running total of *today's* Claude spend. Every whole dollar
-spent flies a 💵 off the tray icon, and crossing every $100 triggers a
-full-screen money-rain animation.
+A menu bar app that tracks your Claude Code spend today. **Every $1 spent flies
+a 💵 off the menu bar — and every $100 makes it rain.** 💸
 
-This is a joke app for fun/demo purposes. The dollar figure is a rough
-estimate derived from published-style per-token pricing, not an official or
-authoritative number from Anthropic.
+Just a joke app: the dollar figure is a rough estimate from per-token pricing,
+not an official number from Anthropic.
 
 ## Requirements
 
