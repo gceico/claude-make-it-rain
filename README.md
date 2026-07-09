@@ -166,6 +166,11 @@ commit and workflow run that built it.
 ## Who's behind this
 
 I'm Gabriel. I build things like this for fun and for my own work, and ship the
-ones that turn out good. I also run AI Workshops; come say hi.
+ones that turn out good.
 
-— Gabriel
+Check [One's Skills](https://github.com/gceico/ones-skills) for my own Claude Skills collection.
+
+I also run AI Workshops and help people turn their expertise into compounded value.
+Come say hi at [Aibl.to](https://aibl.to/)
+
+— Gabriel C.
