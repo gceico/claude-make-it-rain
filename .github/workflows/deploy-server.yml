@@ -1,0 +1,35 @@
+# Deploys the leaderboard server to Railway on pushes to main that touch it.
+# Replaces Railway's GitHub auto-deploy so no deployment statuses (and the
+# public "Deployments" sidebar) appear on the repo. Output is discarded on
+# purpose: Actions logs on a public repo are public, and the Railway CLI
+# prints project/environment IDs. Check the Railway dashboard for build logs.
+name: Deploy server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'railway.json'
+      - '.github/workflows/deploy-server.yml'
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          npm install -g @railway/cli >/dev/null 2>&1
+          if railway up --service claude-make-it-rain --ci >/dev/null 2>&1; then
+            echo 'Deploy succeeded.'
+          else
+            echo 'Deploy failed — see the Railway dashboard for build logs.'
+            exit 1
+          fi
