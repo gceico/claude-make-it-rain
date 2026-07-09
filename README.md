@@ -159,8 +159,9 @@ State lives in a small SQLite database (`server/data/leaderboard.db`, git-ignore
 backed by the built-in `node:sqlite` module — still zero npm dependencies (requires
 Node >= 24). Set `LEADERBOARD_DB` to override the file path.
 
-The reference server deploys to [Railway](https://railway.com) with `railway up ./server`
-(persistent volume mounted at `/data`, `LEADERBOARD_DB=/data/leaderboard.db`).
+The reference server deploys to [Railway](https://railway.com) with `railway up ./server`,
+built from `server/Dockerfile` (`node:24-alpine`, no npm install, sleeps when idle;
+persistent volume mounted at `/data`, `LEADERBOARD_DB=/data/leaderboard.db`).
 
 ## Testing & debug hooks
 
