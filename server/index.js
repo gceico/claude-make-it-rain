@@ -29,12 +29,23 @@ const DATA_FILE = process.env.LEADERBOARD_DB || path.join(__dirname, 'data', 'le
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY_BYTES = 4 * 1024; // reports are tiny; reject anything larger
 const TAG_MAX_LENGTH = 32;
-// Upper bound on a reported total. A trillion USD/day is already absurd; the
-// real reason for a cap is safety: totals near Number.MAX_VALUE survive the
-// isFinite() check but overflow to Infinity in `total * 100`, which SQLite
-// then stores and JSON serializes as `null`. Rejecting them keeps only clean,
-// finite, renderable numbers in the store.
-const MAX_TOTAL = 1e12;
+// Upper bound on a reported total. This is a self-reported board, so the cap is
+// really about bounding absurd/troll values (and, as a bonus, rejecting the
+// near-MAX_VALUE numbers that survive isFinite() but overflow to Infinity in
+// `total * 100`). A day of Claude Code spend realistically lives in the tens or
+// low hundreds of dollars; a $10,000/day default ceiling is generous while still
+// keeping the board honest. Tunable via MAX_REPORT_TOTAL for edge cases.
+const MAX_TOTAL = Number(process.env.MAX_REPORT_TOTAL) || 10000;
+
+// ── Per-IP rate limiting for POST /api/report ───────────────────────────────
+// Legit clients report at most hourly, so a generous ceiling (60 req/min/IP by
+// default) never inconveniences real users while stopping a trivial single-
+// source flood. Client IP comes from x-forwarded-for (Railway sits behind a
+// proxy, so req.socket.remoteAddress is the proxy). XFF is client-influenceable,
+// so this is best-effort: it blocks the naive single-origin flood, NOT a
+// distributed one. Both the max and window are env-overridable.
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 60;
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
 
 // GitHub repo whose star count powers the "Star on GitHub" pill. The page can't
 // call api.github.com directly (its CSP pins connect-src to 'self'), so the
@@ -102,18 +113,60 @@ const CSP =
 
 const db = new LeaderboardDB(DATA_FILE);
 
-function sendJSON(res, status, obj) {
+function sendJSON(res, status, obj, extraHeaders) {
   const body = JSON.stringify(obj);
-  res.writeHead(status, {
+  const headers = {
     'content-type': 'application/json; charset=utf-8',
     'x-content-type-options': 'nosniff',
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'content-type',
     'cache-control': 'no-store',
-  });
+  };
+  if (extraHeaders) Object.assign(headers, extraHeaders);
+  res.writeHead(status, headers);
   res.end(body);
 }
+
+// Best-effort client IP: prefer the FIRST (leftmost) x-forwarded-for entry set
+// by the proxy in front of us; fall back to the raw socket when the header is
+// absent (e.g. local/direct connections). XFF is spoofable, so treat as a hint.
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) {
+    return xff.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || '';
+}
+
+// Fixed-window counter keyed by client IP. Each entry holds the request count
+// for the current window plus the timestamp it resets. On limit exceeded we
+// return the seconds until reset so the caller can emit a Retry-After header.
+const rateBuckets = new Map();
+
+function checkRateLimit(ip, now = Date.now()) {
+  let bucket = rateBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    rateBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > RATE_LIMIT_MAX) {
+    return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) };
+  }
+  return { allowed: true };
+}
+
+// Memory safety: the IP map would otherwise grow without bound. A low-frequency
+// background sweep drops entries whose window has fully expired. `.unref()` keeps
+// this timer from holding the event loop open (so tests/CLI exit cleanly).
+const rateSweeper = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(ip);
+  }
+}, RATE_LIMIT_WINDOW_MS);
+rateSweeper.unref();
 
 function sanitizeTag(tag) {
   if (typeof tag !== 'string') return '';
@@ -123,25 +176,43 @@ function sanitizeTag(tag) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let done = false;
     const chunks = [];
     req.on('data', (c) => {
+      if (done) return; // already over the limit — discard the rest, drain the socket
       size += c.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error('body too large'));
-        req.destroy();
+        done = true;
+        // Tagged so handleReport can distinguish this from a JSON parse error
+        // and answer 413 instead of 400. We do NOT destroy the socket: letting
+        // the stream drain naturally keeps the connection alive long enough to
+        // write the 413 response back to the client.
+        const err = new Error('body too large');
+        err.code = 'BODY_TOO_LARGE';
+        reject(err);
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
+    req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks).toString('utf8')); } });
+    req.on('error', (e) => { if (!done) { done = true; reject(e); } });
   });
 }
 
 async function handleReport(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (err) {
+    if (err && err.code === 'BODY_TOO_LARGE') {
+      return sendJSON(res, 413, { ok: false, error: 'body_too_large' });
+    }
+    return sendJSON(res, 400, { ok: false, error: 'invalid_json' });
+  }
+
   let payload;
   try {
-    payload = JSON.parse(await readBody(req));
+    payload = JSON.parse(raw);
   } catch {
     return sendJSON(res, 400, { ok: false, error: 'invalid_json' });
   }
@@ -185,7 +256,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'OPTIONS') { return sendJSON(res, 204, {}); }
 
-  if (req.method === 'POST' && pathname === '/api/report') return handleReport(req, res);
+  if (req.method === 'POST' && pathname === '/api/report') {
+    const limit = checkRateLimit(clientIp(req));
+    if (!limit.allowed) {
+      return sendJSON(res, 429, { ok: false, error: 'rate_limited' }, { 'retry-after': String(limit.retryAfterSec) });
+    }
+    return handleReport(req, res);
+  }
   if (req.method === 'GET' && pathname === '/api/leaderboard') {
     return sendJSON(res, 200, { date: LeaderboardDB.today(), entries: db.leaderboard() });
   }

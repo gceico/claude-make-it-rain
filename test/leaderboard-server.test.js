@@ -22,22 +22,30 @@ const os = require('os');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mir-server-test-'));
 process.env.LEADERBOARD_DB = path.join(tmpDir, 'lb.db');
+// Rate-limit ceiling for the in-process server. Set comfortably above the ~17
+// POSTs the rest of this suite fires from 127.0.0.1 so those never trip, while
+// the dedicated rate-limit test floods a DISTINCT client IP (via x-forwarded-
+// for) so it exercises the limiter in isolation without affecting other cases.
+const RATE_LIMIT_MAX = 30;
+process.env.RATE_LIMIT_MAX = String(RATE_LIMIT_MAX);
 
 const { server, db } = require('../server/index');
 
-function request(method, urlPath, body) {
+function request(method, urlPath, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const addr = server.address();
     const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
+    const headers = data
+      ? { 'content-type': 'application/json', 'content-length': data.length }
+      : {};
+    if (extraHeaders) Object.assign(headers, extraHeaders);
     const req = http.request(
       {
         host: '127.0.0.1',
         port: addr.port,
         method,
         path: urlPath,
-        headers: data
-          ? { 'content-type': 'application/json', 'content-length': data.length }
-          : {},
+        headers,
       },
       (res) => {
         const chunks = [];
@@ -141,6 +149,18 @@ function rawPost(urlPath, rawBody) {
     console.log('server: total coercion (reject NaN/Inf/neg/absurd/non-number, round valid): OK');
   }
 
+  // ── Daily total cap: $10k default (env-tunable via MAX_REPORT_TOTAL) ─────────
+  {
+    const over = await request('POST', '/api/report', { tag: 'CapCheck', total: 10001 });
+    assert.strictEqual(over.status, 400, 'total just above the $10k cap is rejected');
+    assert.strictEqual(JSON.parse(over.body).error, 'invalid_total', 'above-cap error is invalid_total');
+
+    const under = await request('POST', '/api/report', { tag: 'CapCheck', total: 9999 });
+    assert.strictEqual(under.status, 200, 'total below the cap is accepted');
+    assert.strictEqual(JSON.parse(under.body).total, 9999, 'accepted total round-trips');
+    console.log('server: total cap (reject 10001, accept 9999): OK');
+  }
+
   // ── Oversized body is rejected by the 4KB guard (no crash, not stored) ──────
   {
     const huge = await rawPost('/api/report', JSON.stringify({ tag: 'A'.repeat(8000), total: 1 }));
@@ -148,6 +168,38 @@ function rawPost(urlPath, rawBody) {
     const board = JSON.parse((await request('GET', '/api/leaderboard')).body);
     assert.ok(!board.entries.some((e) => e.tag.startsWith('AAAA')), 'oversized tag never stored');
     console.log('server: oversized body guard holds: OK');
+  }
+
+  // ── Oversized body returns a proper 413 body_too_large (not 400 invalid_json) ─
+  {
+    // >MAX_BODY_BYTES (4KB) of valid JSON: the guard must answer 413, and the
+    // tagged error must NOT be mislabeled as a JSON parse failure.
+    const big = await rawPost('/api/report', JSON.stringify({ tag: 'B'.repeat(5000), total: 1 }));
+    assert.strictEqual(big.status, 413, 'oversized body returns 413');
+    assert.strictEqual(JSON.parse(big.body).error, 'body_too_large', 'oversized body error is body_too_large');
+    console.log('server: oversized body returns 413 body_too_large: OK');
+  }
+
+  // ── Per-IP rate limiter on POST /api/report ─────────────────────────────────
+  {
+    // Flood a DISTINCT client IP via x-forwarded-for so the limiter is exercised
+    // in isolation from the 127.0.0.1 traffic the rest of the suite generates.
+    const floodHeaders = { 'x-forwarded-for': '198.51.100.7' };
+    for (let i = 0; i < RATE_LIMIT_MAX; i++) {
+      const ok = await request('POST', '/api/report', { tag: 'Flood', total: 1 }, floodHeaders);
+      assert.strictEqual(ok.status, 200, `request ${i + 1} under the limit succeeds`);
+    }
+    const blocked = await request('POST', '/api/report', { tag: 'Flood', total: 1 }, floodHeaders);
+    assert.strictEqual(blocked.status, 429, 'request over the limit is rate-limited');
+    assert.strictEqual(JSON.parse(blocked.body).error, 'rate_limited', '429 body error is rate_limited');
+    assert.ok(blocked.headers['retry-after'], '429 carries a Retry-After header');
+    assert.ok(Number(blocked.headers['retry-after']) > 0, 'Retry-After is a positive number of seconds');
+    assert.strictEqual(blocked.headers['x-content-type-options'], 'nosniff', '429 keeps nosniff header');
+
+    // A different IP is unaffected (the limiter is per-IP, not global).
+    const other = await request('POST', '/api/report', { tag: 'Other', total: 1 }, { 'x-forwarded-for': '203.0.113.9' });
+    assert.strictEqual(other.status, 200, 'a different IP is not rate-limited');
+    console.log('server: per-IP rate limiter (429 + Retry-After past limit, other IP OK): OK');
   }
 
   // ── Security headers ────────────────────────────────────────────────────────
