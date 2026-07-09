@@ -173,11 +173,17 @@
       font-size: clamp(0.98rem, 2.4vw, 1.08rem);
       text-wrap: balance;
     }
+    .pills {
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
     .datepill {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      margin-top: 18px;
       padding: 6px 14px 6px 12px;
       border-radius: 999px;
       background: color-mix(in oklab, var(--gold) 12%, transparent);
@@ -188,6 +194,15 @@
     }
     .datepill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 0 var(--gold); }
     .datepill .date { font-family: var(--mono); font-weight: 700; }
+    /* Reset countdown — neutral so the gold date pill stays the primary accent. */
+    .datepill.reset {
+      background: color-mix(in oklab, var(--muted-strong) 8%, transparent);
+      border-color: color-mix(in oklab, var(--muted-strong) 26%, transparent);
+      color: var(--muted-strong);
+    }
+    .datepill.reset .dot { background: var(--muted-strong); animation: reset-pulse 2s var(--ease-out) infinite; }
+    .datepill.reset .date { min-width: 8ch; text-align: center; }
+    @keyframes reset-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 
     /* Today's total — the single meaningful headline figure. */
     .tally {
@@ -376,7 +391,10 @@
     <header class="hero">
       <h1 class="wordmark"><span class="rain-emoji">💸</span> Make It Rain</h1>
       <p class="tagline">The daily leaderboard of who made it rain hardest on Claude&nbsp;Code.</p>
-      <div class="datepill"><span class="dot"></span> Leaderboard of <span class="date" id="date">…</span></div>
+      <div class="pills">
+        <div class="datepill"><span class="dot"></span> Leaderboard of <span class="date" id="date">…</span></div>
+        <div class="datepill reset"><span class="dot"></span> Resets in <span class="date" id="countdown">…</span></div>
+      </div>
 
       <div class="tally" id="tally">
         <div class="amt" id="tallyAmt">$0.00</div>
@@ -424,6 +442,16 @@
       return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    /* "2026-07-09" (the server's UTC day) -> "July 9, 2026". Parsed as UTC so the
+       displayed date never drifts a day in the viewer's local timezone. */
+    function prettyDate(iso) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+      if (!m) return iso || '';
+      var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+      return d.toLocaleDateString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+      });
+    }
 
     /* ── Ambient falling money ─────────────────────────────────────────────── */
     function seedRain() {
@@ -476,7 +504,7 @@
     }
 
     function render(data) {
-      document.getElementById('date').textContent = data.date || '';
+      document.getElementById('date').textContent = prettyDate(data.date);
       var board = document.getElementById('board');
       board.classList.remove('skel');
       board.removeAttribute('aria-busy');
@@ -525,12 +553,32 @@
         '</div>';
     }
 
+    function loadBoard() {
+      fetch('/api/leaderboard')
+        .then(function (r) { if (!r.ok) throw new Error('bad status'); return r.json(); })
+        .then(render)
+        .catch(showError);
+    }
+
+    /* ── Countdown to the daily reset (next UTC midnight) ──────────────────── */
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function tickCountdown() {
+      var now = new Date();
+      var next = Date.UTC(
+        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0
+      );
+      var ms = next - now.getTime();
+      if (ms <= 0) { loadBoard(); ms = 0; }   // rolled past midnight — refresh the board
+      var s = Math.floor(ms / 1000);
+      var el = document.getElementById('countdown');
+      el.textContent = pad(Math.floor(s / 3600)) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
+    }
+
     seedRain();
     loadStars();
-    fetch('/api/leaderboard')
-      .then(function (r) { if (!r.ok) throw new Error('bad status'); return r.json(); })
-      .then(render)
-      .catch(showError);
+    loadBoard();
+    tickCountdown();
+    setInterval(tickCountdown, 1000);
   </script>
 </body>
 </html>
