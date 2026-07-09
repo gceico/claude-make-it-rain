@@ -1,8 +1,9 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require('electron');
 const path = require('path');
 const { UsageMonitor } = require('./lib/usage-monitor');
+const { LeaderboardClient } = require('./lib/leaderboard-client');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -10,6 +11,7 @@ let overlay = null;
 let overlayReady = false;
 let pendingOverlayMessages = [];
 let monitor = null;
+let leaderboard = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 
 // 16x16 green square fallback for platforms without tray title text (win/linux).
@@ -32,15 +34,41 @@ function formatTitle(total) {
 
 function rebuildTrayMenu() {
   const s = latestSnapshot;
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
-      { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
+  const template = [
+    { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
+    { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
+    { type: 'separator' },
+    { label: 'Make It Rain (test)', click: () => sendToOverlay('rain') },
+  ];
+
+  if (leaderboard) {
+    template.push(
       { type: 'separator' },
-      { label: 'Make It Rain (test)', click: () => sendToOverlay('rain') },
-      { label: 'Quit', click: () => app.quit() },
-    ])
-  );
+      { label: `Leaderboard tag: ${leaderboard.gamerTag}`, enabled: false },
+      {
+        label: 'Share on daily leaderboard',
+        type: 'checkbox',
+        checked: leaderboard.telemetryEnabled,
+        click: (item) => {
+          leaderboard.setTelemetryEnabled(item.checked);
+          if (item.checked) leaderboard.reportNow();
+          rebuildTrayMenu();
+        },
+      },
+      { label: 'New random tag', click: () => { leaderboard.regenerateTag(); rebuildTrayMenu(); } },
+      { label: 'View leaderboard…', click: () => openLeaderboardPage() },
+    );
+  }
+
+  template.push({ label: 'Quit', click: () => app.quit() });
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+function openLeaderboardPage() {
+  try {
+    const base = leaderboard.config.apiBaseUrl.replace(/\/+$/, '');
+    shell.openExternal(base + '/');
+  } catch { /* ignore — opening the page is best-effort */ }
 }
 
 function applySnapshot(snapshot) {
@@ -165,6 +193,16 @@ if (!app.requestSingleInstanceLock()) {
     monitor.onUpdate = (previousTotal, snapshot) => handleUpdate(previousTotal, snapshot);
     monitor.start();
 
+    // Cloud daily leaderboard: anonymized tag + today's total, reported hourly.
+    // Telemetry is ON by default but disclosed and toggleable from the tray menu.
+    leaderboard = new LeaderboardClient({
+      configDir: app.getPath('userData'),
+      getTotal: () => latestSnapshot.totalCostUSD,
+      onConfigChange: () => { if (tray) rebuildTrayMenu(); },
+    });
+    leaderboard.start();
+    rebuildTrayMenu();
+
     // Launch hooks for testing without clicking the menu:
     //   MIR_TEST_RAIN=1  triggers the rain animation after 1.5s
     //   MIR_TEST_SHOT=/path.png  captures the overlay to a PNG a few seconds later
@@ -185,5 +223,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', (e) => e.preventDefault()); // keep alive in tray
-  app.on('will-quit', () => { if (monitor) monitor.stop(); });
+  app.on('will-quit', () => {
+    if (monitor) monitor.stop();
+    if (leaderboard) leaderboard.stop();
+  });
 }

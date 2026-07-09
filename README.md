@@ -87,7 +87,7 @@ immediately.
   shown as the icon).
 - Click the tray item for a menu with today's total, today's input/output
   token counts, a **Make It Rain (test)** item to preview the rain animation,
-  and **Quit**.
+  the daily-leaderboard controls (see privacy section below), and **Quit**.
 - A 💵 flies off the tray item every time the running total crosses a whole
   dollar; crossing every $100 multiple plays a ~6-second full-screen shower
   of 💵💸💰🤑. The overlay is click-through and only exists while animating.
@@ -102,6 +102,60 @@ immediately.
   1.25x/2x the input rate for 5-minute/1-hour ephemeral cache creation.
 - Entries are deduplicated by `requestId:messageId` since the same entry can
   appear more than once across files.
+
+## Daily leaderboard & privacy (GDPR)
+
+Make It Rain has an optional **cloud leaderboard of the day**: a friendly ranking
+of who made it rain hardest today, by anonymized tag.
+
+### What is sent
+
+Exactly two things, once an hour:
+
+- your **anonymized gamer tag** (e.g. `TurboLlama7392`), generated randomly on
+  first run and stored locally;
+- **today's estimated total** in USD.
+
+That's it. **No** account, email, IP-derived identity, file paths, project
+names, model names, prompts, or any other data leaves your machine. The server
+does not log IPs or per-user metadata, stores only `tag → max daily total`, and
+resets every day (UTC) — old days are pruned automatically.
+
+### It's opt-out, clearly disclosed, and easy to disable
+
+Telemetry is **on by default** but fully under your control from the tray menu:
+
+- **Share on daily leaderboard** — a checkbox to turn reporting on/off instantly.
+- **New random tag** — reroll your anonymous tag any time.
+- **View leaderboard…** — opens the landing page in your browser.
+- **Leaderboard tag: …** — shows the exact tag being used.
+
+Your choice is saved in a local config file (`config.json` under Electron's
+`userData` directory — e.g. `~/Library/Application Support/make-it-rain/` on
+macOS, `~/.config/make-it-rain/` on Linux, `%APPDATA%\make-it-rain\` on Windows).
+You can also edit it by hand: set `"telemetryEnabled": false`, change
+`"gamerTag"`, or repoint `"apiBaseUrl"`.
+
+Because no personal data is collected and the tag is anonymous, random, and
+user-changeable, there is nothing to identify you by — consistent with GDPR data
+minimization. Disabling telemetry stops all network activity. If the server is
+unreachable (the default URL is a placeholder), the client fails silently: no
+errors, no crashes, no retry storms.
+
+### Running the backend yourself
+
+The server is a tiny, zero-dependency Node HTTP app under `server/` (not deployed
+by this repo). Point the client at it via `apiBaseUrl` in `config.json`.
+
+```bash
+node server/index.js          # listens on http://localhost:8787
+```
+
+- `POST /api/report` — body `{ "tag": "...", "total": 12.34 }`
+- `GET  /api/leaderboard` — today's top tags as JSON
+- `GET  /` — the landing page (`server/public/index.html`)
+
+State lives in a small JSON file (`server/data/leaderboard.json`, git-ignored).
 
 ## Testing & debug hooks
 
@@ -120,11 +174,19 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   reset (pure Node, no Electron — unit-testable).
 - `lib/pricing.js` — per-model USD/1M-token pricing table and per-entry cost
   calculation (pure Node).
+- `lib/leaderboard-client.js` — anonymized-tag generation, config persistence,
+  telemetry toggle, and hourly fail-silent reporting to the cloud leaderboard
+  (pure Node, no Electron — unit-testable).
+- `server/` — tiny zero-dependency Node HTTP backend (`index.js` + `db.js`) and
+  the leaderboard landing page (`public/index.html`). Self-contained, not
+  deployed by this repo.
 - `overlay.html` + `preload.js` — transparent, click-through, always-on-top
   fullscreen overlay that renders the dollar-fly and money-rain animations,
   hiding itself when idle.
 - `test/usage-monitor.test.js` — pricing math, dedup, day filtering,
   incremental/partial-line reads, crossing math.
+- `test/leaderboard-client.test.js` — tag generation/sanitization, config
+  first-run/stability/recovery, telemetry toggle, and fail-silent reporting.
 - `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 18/20/22)
   and the npm publish pipeline.
 
