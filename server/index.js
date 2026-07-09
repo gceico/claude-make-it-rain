@@ -171,7 +171,6 @@ function serveStatic(res, urlPath) {
       : ext === '.css' ? 'text/css; charset=utf-8'
       : ext === '.js' ? 'text/javascript; charset=utf-8'
       : ext === '.svg' ? 'image/svg+xml; charset=utf-8'
-      : ext === '.png' ? 'image/png'
       : 'application/octet-stream';
     const headers = { 'content-type': type, 'x-content-type-options': 'nosniff' };
     if (ext === '.html') headers['content-security-policy'] = CSP;
