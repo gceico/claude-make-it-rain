@@ -94,6 +94,30 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
   console.log('old-day pruning: OK');
 }
 
+// ── Tag credentials: claim once, verify, reject spoof, survive pruning ────────
+{
+  const db = new LeaderboardDB(dbPath);
+
+  // First claim mints a raw secret; the tag now has a credential.
+  const secret = db.claimTag('OwnerTag');
+  assert.ok(typeof secret === 'string' && secret.length > 0, 'claimTag returns a non-empty secret');
+  assert.strictEqual(db.claimTag('OwnerTag'), null, 're-claiming the same tag returns null');
+
+  // Verify trichotomy: valid / invalid / unregistered.
+  assert.strictEqual(db.verifyCredential('OwnerTag', secret), 'valid', 'correct secret is valid');
+  assert.strictEqual(db.verifyCredential('OwnerTag', 'wrong'), 'invalid', 'wrong secret is invalid');
+  assert.strictEqual(db.verifyCredential('OwnerTag', ''), 'invalid', 'empty secret is invalid');
+  assert.strictEqual(db.verifyCredential('OwnerTag', null), 'invalid', 'non-string secret is invalid');
+  assert.strictEqual(db.verifyCredential('NeverSeen', 'x'), 'unregistered', 'unknown tag is unregistered');
+
+  // Credentials must survive the daily prune (which only touches `leaderboard`).
+  db.report('AncientTag', 1, OLD_DAY);
+  db.report('FreshTag', 1, TODAY); // triggers _pruneOldDays
+  assert.strictEqual(db.verifyCredential('OwnerTag', secret), 'valid', 'credential survives pruning');
+  db.close();
+  console.log('tag credentials (claim once, verify trichotomy, prune-immune): OK');
+}
+
 // force + retries: on Windows the WAL sidecar files can linger a beat after close.
 fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 delete process.env.LEADERBOARD_DB;

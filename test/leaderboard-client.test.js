@@ -279,6 +279,84 @@ const configFile = (dir) => path.join(dir, 'config.json');
 
   console.log('client reporting (payload minimalism, disable, fail-silent): OK');
 
+  // ── Auto-registration: first report claims a secret, then sends it ───────────
+  {
+    const dir = path.join(tmpRoot, 'autoreg');
+    const calls = [];
+    const fetchImpl = async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts.body) });
+      if (url.endsWith('/api/register')) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, tag: JSON.parse(opts.body).tag, secret: 'SEKRET123' }) };
+      }
+      return { ok: true, status: 200 }; // /api/report
+    };
+    const c = new LeaderboardClient({ configDir: dir, getTotal: () => 3.21, fetchImpl });
+    const sent = await c.reportNow();
+    assert.strictEqual(sent, true, 'report succeeds after auto-register');
+    assert.strictEqual(calls.length, 2, 'exactly two calls: register then report');
+    assert.ok(calls[0].url.endsWith('/api/register'), 'first call is /api/register');
+    assert.deepStrictEqual(Object.keys(calls[0].body).sort(), ['tag'], 'register body is just { tag }');
+    assert.ok(calls[1].url.endsWith('/api/report'), 'second call is /api/report');
+    assert.strictEqual(calls[1].body.secret, 'SEKRET123', 'report carries the freshly issued secret');
+    assert.strictEqual(calls[1].body.total, 3.21, 'report carries the total');
+    // Secret persisted to disk.
+    assert.strictEqual(loadConfig(dir).tagSecret, 'SEKRET123', 'secret persisted to config.json');
+
+    // A second report reuses the stored secret WITHOUT re-registering.
+    calls.length = 0;
+    await c.reportNow();
+    assert.strictEqual(calls.length, 1, 'second report does not re-register');
+    assert.ok(calls[0].url.endsWith('/api/report'), 'second report hits /api/report directly');
+    assert.strictEqual(calls[0].body.secret, 'SEKRET123', 'reuses the stored secret');
+    console.log('client auto-register (register once, then sends secret with reports): OK');
+  }
+
+  // ── 409 on register: reroll the tag and retry once ───────────────────────────
+  {
+    const dir = path.join(tmpRoot, 'autoreg-taken');
+    const calls = [];
+    let firstRegister = true;
+    const fetchImpl = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, body });
+      if (url.endsWith('/api/register')) {
+        if (firstRegister) { firstRegister = false; return { ok: false, status: 409, json: async () => ({ ok: false, error: 'tag_taken' }) }; }
+        return { ok: true, status: 200, json: async () => ({ ok: true, tag: body.tag, secret: 'SECOND' }) };
+      }
+      return { ok: true, status: 200 };
+    };
+    const c = new LeaderboardClient({ configDir: dir, getTotal: () => 1, fetchImpl });
+    const firstTag = c.gamerTag;
+    await c.reportNow();
+    const registers = calls.filter((x) => x.url.endsWith('/api/register'));
+    assert.strictEqual(registers.length, 2, 'registered twice (initial 409 then retry)');
+    assert.notStrictEqual(c.gamerTag, firstTag, 'tag was rerolled after 409');
+    assert.strictEqual(loadConfig(dir).tagSecret, 'SECOND', 'secret from the retry persisted');
+    console.log('client auto-register 409 -> reroll + retry once: OK');
+  }
+
+  // ── Tag change clears the stored secret (forces re-registration) ─────────────
+  {
+    const dir = path.join(tmpRoot, 'secret-clear');
+    const client = new LeaderboardClient({ configDir: dir, getTotal: () => 0, fetchImpl: null });
+    // Seed a secret directly.
+    client.config = { ...client.config, tagSecret: 'OLD' };
+    client._persist();
+    assert.strictEqual(loadConfig(dir).tagSecret, 'OLD', 'seeded secret on disk');
+
+    client.regenerateTag();
+    assert.strictEqual(client.config.tagSecret, undefined, 'regenerateTag clears in-memory secret');
+    assert.strictEqual(loadConfig(dir).tagSecret, undefined, 'regenerateTag clears persisted secret');
+
+    // Re-seed then change via setTag.
+    client.config = { ...client.config, tagSecret: 'OLD2' };
+    client._persist();
+    client.setTag('BrandNewTag');
+    assert.strictEqual(client.config.tagSecret, undefined, 'setTag clears in-memory secret');
+    assert.strictEqual(loadConfig(dir).tagSecret, undefined, 'setTag clears persisted secret');
+    console.log('client tag change clears tagSecret (regenerateTag + setTag): OK');
+  }
+
   fs.rmSync(tmpRoot, { recursive: true, force: true });
   console.log('\nAll leaderboard-client tests passed.');
 })().catch((err) => {

@@ -216,6 +216,63 @@ function rawPost(urlPath, rawBody) {
     console.log('server: security headers (nosniff + JSON type + CSP on HTML): OK');
   }
 
+  // ── Tag credentials: register + secret-authenticated reports ────────────────
+  // Each block uses a DISTINCT x-forwarded-for IP so register+report pairs never
+  // exhaust the shared 127.0.0.1 rate-limit window used by the cases above.
+  {
+    const ip = { 'x-forwarded-for': '198.51.100.20' };
+
+    // Fresh tag registers and gets a non-empty secret.
+    const reg = await request('POST', '/api/register', { tag: 'CredHolder' }, ip);
+    assert.strictEqual(reg.status, 200, 'register fresh tag -> 200');
+    const regBody = JSON.parse(reg.body);
+    assert.strictEqual(regBody.ok, true, 'register ok:true');
+    assert.strictEqual(regBody.tag, 'CredHolder', 'register echoes the tag');
+    assert.ok(typeof regBody.secret === 'string' && regBody.secret.length > 0, 'register returns a non-empty secret');
+    const secret = regBody.secret;
+
+    // Re-registering the SAME tag is rejected as taken.
+    const dup = await request('POST', '/api/register', { tag: 'CredHolder' }, ip);
+    assert.strictEqual(dup.status, 409, 're-register same tag -> 409');
+    assert.strictEqual(JSON.parse(dup.body).error, 'tag_taken', '409 error is tag_taken');
+    console.log('server: register fresh tag (200 + secret), duplicate (409 tag_taken): OK');
+
+    // Correct secret -> report accepted and it appears on the board.
+    const good = await request('POST', '/api/report', { tag: 'CredHolder', total: 42, secret }, ip);
+    assert.strictEqual(good.status, 200, 'report with correct secret -> 200');
+    assert.strictEqual(JSON.parse(good.body).total, 42, 'correct-secret report stores the total');
+    let board = JSON.parse((await request('GET', '/api/leaderboard')).body);
+    assert.ok(board.entries.some((e) => e.tag === 'CredHolder' && e.total === 42), 'registered tag on the board at 42');
+    console.log('server: report with valid secret recorded: OK');
+
+    // Wrong secret -> 401, and the stored total is unchanged (not recorded).
+    const bad = await request('POST', '/api/report', { tag: 'CredHolder', total: 500, secret: 'not-the-secret' }, ip);
+    assert.strictEqual(bad.status, 401, 'report with wrong secret -> 401');
+    assert.strictEqual(JSON.parse(bad.body).error, 'unauthorized', '401 error is unauthorized');
+    board = JSON.parse((await request('GET', '/api/leaderboard')).body);
+    const afterWrong = board.entries.find((e) => e.tag === 'CredHolder');
+    assert.strictEqual(afterWrong.total, 42, 'wrong-secret report did NOT change the total');
+
+    // No secret for a registered tag -> 401, not recorded.
+    const none = await request('POST', '/api/report', { tag: 'CredHolder', total: 900 }, ip);
+    assert.strictEqual(none.status, 401, 'report with NO secret for a registered tag -> 401');
+    assert.strictEqual(JSON.parse(none.body).error, 'unauthorized', 'missing-secret error is unauthorized');
+    board = JSON.parse((await request('GET', '/api/leaderboard')).body);
+    assert.strictEqual(board.entries.find((e) => e.tag === 'CredHolder').total, 42, 'missing-secret report not recorded');
+    console.log('server: registered tag rejects wrong/absent secret (401, unchanged): OK');
+  }
+
+  // ── Soft migration: an UNREGISTERED tag with no secret is still accepted ─────
+  {
+    const ip = { 'x-forwarded-for': '198.51.100.21' };
+    const res = await request('POST', '/api/report', { tag: 'LegacyTrust', total: 7 }, ip);
+    assert.strictEqual(res.status, 200, 'unregistered tag, no secret -> 200 (soft default)');
+    assert.strictEqual(JSON.parse(res.body).total, 7, 'legacy report stores the total');
+    const board = JSON.parse((await request('GET', '/api/leaderboard')).body);
+    assert.ok(board.entries.some((e) => e.tag === 'LegacyTrust' && e.total === 7), 'legacy tag on the board');
+    console.log('server: unregistered tag accepted on trust (REQUIRE_SIGNED off): OK');
+  }
+
   await new Promise((r) => server.close(r));
   db.close(); // release the SQLite handle so Windows can delete the temp file
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
