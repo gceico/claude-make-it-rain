@@ -194,7 +194,10 @@ function handleUpdate(previousTotal, snapshot) {
 
 // ── Past-spending history ─────────────────────────────────────────────────────
 /** Lazily (re)scan every range in the background and refresh the menu as each
- *  result lands. Cheap when cached; never blocks the tray. */
+ *  result lands. Never blocks the tray. Past days come from History's
+ *  immutable per-day ledger (built once per local day), so even a forced
+ *  refresh only re-reads files touched today — steady-state cost stays near
+ *  zero regardless of how much log history exists. */
 function refreshHistory({ force = false } = {}) {
   if (!history) return;
   for (const range of RANGES) {
@@ -250,7 +253,8 @@ if (!app.requestSingleInstanceLock()) {
     monitor.onUpdate = (previousTotal, snapshot) => handleUpdate(previousTotal, snapshot);
     monitor.start();
 
-    // Retroactive spend history (reads existing logs; no database).
+    // Retroactive spend history (reads existing logs; no database). The
+    // periodic force refresh is cheap: it only rescans files touched today.
     history = new History({ cacheTtlMs: HISTORY_REFRESH_MS });
     refreshHistory();
     const historyTimer = setInterval(() => refreshHistory({ force: true }), HISTORY_REFRESH_MS);

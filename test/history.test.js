@@ -128,6 +128,69 @@ fs.writeFileSync(
   await Promise.all([p1, p3]);
   console.log('History cache: OK');
 
+  // ── Immutable past-days ledger: only today's files re-read on refresh ─────
+  // Make session2 look untouched since yesterday (its newest entry IS from
+  // yesterday, so this mirrors reality: mtime >= newest entry timestamp).
+  const session2 = path.join(projectB, 'session2.jsonl');
+  const yestNoon = new Date(2026, 5, 14, 12, 30, 0);
+  fs.utimesSync(session2, yestNoon, yestNoon);
+
+  const reads = [];
+  const realReadFile = fs.promises.readFile;
+  fs.promises.readFile = function (...args) {
+    reads.push(String(args[0]));
+    return realReadFile.apply(fs.promises, args);
+  };
+
+  try {
+    const h2 = new History({ projectsDir, cacheTtlMs: 10_000 });
+    const first = await h2.get('last7days', { now: NOW });
+    approx(first.totalCostUSD, 12, 'ledger-backed last7 total matches full scan');
+    assert.ok(
+      reads.some((f) => f.endsWith('session2.jsonl')),
+      'initial ledger build must read past files'
+    );
+
+    // Forced refresh: past days come from the cached ledger; only files
+    // touched today are re-read.
+    reads.length = 0;
+    const second = await h2.get('last7days', { force: true, now: NOW });
+    approx(second.totalCostUSD, 12, 'forced refresh total unchanged');
+    assert.ok(
+      !reads.some((f) => f.endsWith('session2.jsonl')),
+      'forced refresh must NOT re-read files untouched since yesterday'
+    );
+    assert.ok(
+      reads.some((f) => f.endsWith('session1.jsonl')),
+      'forced refresh re-reads today-touched files'
+    );
+
+    // New today entry is picked up; a late entry with a past-day timestamp is
+    // ignored (completed days are treated as immutable).
+    fs.appendFileSync(
+      path.join(projectA, 'session1.jsonl'),
+      entry({ ts: tsAt(0), reqId: 'c', msgId: '20', inputM: 1 }) + '\n' +
+        entry({ ts: tsAt(-1), reqId: 'c', msgId: '21', inputM: 1 }) + '\n'
+    );
+    const third = await h2.get('last7days', { force: true, now: NOW });
+    approx(third.totalCostUSD, 15, 'today picks up new entries; past days stay cached');
+    approx(third.days.find((d) => d.date === '2026-06-15').costUSD, 9, 'today bucket updated');
+    approx(third.days.find((d) => d.date === '2026-06-14').costUSD, 3, 'yesterday bucket immutable');
+
+    // A forced refresh of ALL ranges at once must share a single today scan.
+    reads.length = 0;
+    await Promise.all(
+      ['today', 'yesterday', 'last7days', 'last30days', 'thisMonth'].map((id) =>
+        h2.get(id, { force: true, now: NOW })
+      )
+    );
+    const s1Reads = reads.filter((f) => f.endsWith('session1.jsonl')).length;
+    assert.strictEqual(s1Reads, 1, `expected 1 shared today scan, got ${s1Reads} reads of session1`);
+  } finally {
+    fs.promises.readFile = realReadFile;
+  }
+  console.log('immutable past-days ledger (only today re-read on refresh): OK');
+
   fs.rmSync(tmpRoot, { recursive: true, force: true });
   console.log('\nAll history tests passed.');
 })().catch((err) => {
