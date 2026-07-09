@@ -11,18 +11,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # enables npm provenance
+      id-token: write # OIDC: mints the short-lived publish token AND provenance
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Actions are SHA-pinned (not @v4) so a re-pointed tag can't run malicious
+      # code inside this job while it holds id-token: write. Comments track the
+      # human-readable version; bump the SHA + comment together (Dependabot can).
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
           cache: npm
+      # Tokenless OIDC trusted publishing needs npm >= 11.5.1; Node 20 ships 10.x.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm test
+      # No NODE_AUTH_TOKEN: publish authenticates via OIDC trusted publisher, so
+      # there is no long-lived NPM_TOKEN secret to steal. Delete that secret in
+      # the GitHub repo settings if it still exists.
       - run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -55,7 +55,7 @@ function request(method, urlPath, body) {
 
 // Same POST helper but with a raw (possibly non-JSON) body string.
 function rawPost(urlPath, rawBody) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const addr = server.address();
     const data = Buffer.from(rawBody);
     const req = http.request(
@@ -84,7 +84,7 @@ function rawPost(urlPath, rawBody) {
       { tag: '"><script>evil</script>', want: 'scriptevilscript' },
       { tag: "' onmouseover='alert(1)", want: 'onmouseoveralert1' },
     ];
-    for (const { tag, want } of payloads) {
+    for (const { tag } of payloads) {
       const res = await request('POST', '/api/report', { tag, total: 1 });
       assert.strictEqual(res.status, 200, `accepted (sanitized) tag ${JSON.stringify(tag)}`);
     }
