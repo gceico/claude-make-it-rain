@@ -3,6 +3,8 @@
 [![CI](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml/badge.svg)](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@gceico/make-it-rain)](https://www.npmjs.com/package/@gceico/make-it-rain)
 
+![Make It Rain in action](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/make-it-rain.gif)
+
 A satirical tray/menu bar app that watches your Claude Code session logs and
 shows an estimated running total of *today's* Claude spend. Every whole dollar
 spent flies a 💵 off the tray icon, and crossing every $100 triggers a
