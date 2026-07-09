@@ -73,6 +73,28 @@ const configFile = (dir) => path.join(dir, 'config.json');
   console.log('normalizeConfig: OK');
 }
 
+// ── Legacy placeholder apiBaseUrl migrates to the current default ────────────
+// Older builds persisted the placeholder default into config.json on first run;
+// those saved values must not shadow the real server URL. Custom URLs still win.
+{
+  assert.strictEqual(
+    normalizeConfig({ apiBaseUrl: 'https://make-it-rain.example.com' }).apiBaseUrl,
+    DEFAULT_API_BASE_URL,
+    'legacy placeholder migrates to the current default'
+  );
+  assert.strictEqual(
+    normalizeConfig({ apiBaseUrl: 'https://make-it-rain.example.com/' }).apiBaseUrl,
+    DEFAULT_API_BASE_URL,
+    'legacy placeholder with trailing slash also migrates'
+  );
+  assert.strictEqual(
+    normalizeConfig({ apiBaseUrl: 'https://my-own-leaderboard.example.org' }).apiBaseUrl,
+    'https://my-own-leaderboard.example.org',
+    'genuine custom URL is preserved'
+  );
+  console.log('legacy apiBaseUrl migration: OK');
+}
+
 // ── First-run creation + persistence round-trip ──────────────────────────────
 {
   const dir = path.join(tmpRoot, 'firstrun');
