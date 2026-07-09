@@ -1,13 +1,15 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, screen, shell } = require('electron');
 const path = require('path');
+const { execFile } = require('child_process');
 const { UsageMonitor } = require('./lib/usage-monitor');
 const { Config } = require('./lib/config');
 const denominations = require('./lib/denominations');
 const { LeaderboardClient } = require('./lib/leaderboard-client');
 const { History, RANGES, billCount } = require('./lib/history');
 const { stackCountForCrossing } = require('./lib/milestones');
+const { UpdateChecker, shouldNotify } = require('./lib/update-checker');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -17,6 +19,15 @@ let overlays = new Map();
 let monitor = null;
 let config = null;
 let leaderboard = null;
+let updateChecker = null;
+// Set once a newer version is seen; drives the top "⬆️ Update to vX.Y.Z" tray
+// item. Cleared implicitly when the app relaunches (already up to date).
+let availableUpdateVersion = null;
+// True while `npm install -g …` is running, so the tray item shows "Updating…"
+// and can't be clicked twice.
+let updateInProgress = false;
+const UPDATE_PACKAGE = '@gceico/claude-make-it-rain';
+const RELEASES_URL = 'https://github.com/gceico/claude-make-it-rain/releases';
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 let initialScanHandled = false;
 let history = null;
@@ -85,7 +96,20 @@ function historyMenuItem(range) {
 function rebuildTrayMenu() {
   const s = latestSnapshot;
   const muted = config ? !!config.get('muted') : false;
-  const template = [
+  const template = [];
+
+  // Top item: only present once a newer version has been detected. While the
+  // install runs it disables itself and reads "Updating…".
+  if (availableUpdateVersion) {
+    template.push(
+      updateInProgress
+        ? { label: 'Updating…', enabled: false }
+        : { label: `⬆️ Update to v${availableUpdateVersion}`, click: () => runUpdate() },
+      { type: 'separator' },
+    );
+  }
+
+  template.push(
     { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
     { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
     { type: 'separator' },
@@ -98,7 +122,7 @@ function rebuildTrayMenu() {
       ],
     },
     { label: 'Past spending', submenu: RANGES.map(historyMenuItem) },
-  ];
+  );
 
   if (leaderboard) {
     template.push(
@@ -140,6 +164,59 @@ function openLeaderboardPage() {
     const base = leaderboard.config.apiBaseUrl.replace(/\/+$/, '');
     shell.openExternal(base + '/');
   } catch { /* ignore — opening the page is best-effort */ }
+}
+
+/** Fire-and-forget desktop notification. Never throws (best-effort UX). */
+function notify(title, body) {
+  try {
+    if (Notification.isSupported && !Notification.isSupported()) return;
+    new Notification({ title, body }).show();
+  } catch { /* notifications are best-effort; never crash on them */ }
+}
+
+/**
+ * Called when the update checker finds a newer version. Records it for the tray
+ * item, and shows exactly ONE notification per version — gated on the
+ * `lastNotifiedUpdateVersion` key in the shared config so relaunches don't
+ * re-notify for a version the user already saw.
+ */
+function onUpdateAvailable({ version }) {
+  availableUpdateVersion = version;
+  const lastNotified = config ? config.get('lastNotifiedUpdateVersion') : null;
+  if (shouldNotify(version, lastNotified)) {
+    if (config) config.set('lastNotifiedUpdateVersion', version);
+    notify('Make It Rain', `Make It Rain v${version} is available`);
+  }
+  if (tray) rebuildTrayMenu();
+}
+
+/**
+ * Update in place via the global npm install. Uses execFile (argv array, NOT a
+ * shell string) so the version is never shell-interpolated. On success we can't
+ * hot-swap a running Electron app, so we ask the user to restart; on failure we
+ * fall back to opening the GitHub releases page. Never crashes the app.
+ */
+function runUpdate() {
+  if (updateInProgress || !availableUpdateVersion) return;
+  updateInProgress = true;
+  rebuildTrayMenu();
+
+  const target = availableUpdateVersion;
+  const args = ['install', '-g', `${UPDATE_PACKAGE}@latest`];
+  execFile('npm', args, { timeout: 5 * 60 * 1000 }, (err) => {
+    updateInProgress = false;
+    if (err) {
+      notify('Make It Rain', 'Update failed — opening the releases page.');
+      try { shell.openExternal(RELEASES_URL); } catch { /* best-effort */ }
+      rebuildTrayMenu();
+      return;
+    }
+    // Installed the new global binary; the running process still holds the old
+    // code, so a restart is required to pick it up.
+    availableUpdateVersion = null;
+    notify('Make It Rain', `Updated to v${target} — quit and restart to apply`);
+    rebuildTrayMenu();
+  });
 }
 
 function setMuted(muted) {
@@ -422,6 +499,15 @@ if (!app.requestSingleInstanceLock()) {
       onConfigChange: () => { if (tray) rebuildTrayMenu(); },
     });
     leaderboard.start();
+
+    // Update checker: ask npm daily whether a newer version is published and
+    // surface an in-tray update path. Fully fail-silent (see lib/update-checker).
+    updateChecker = new UpdateChecker({
+      currentVersion: app.getVersion(),
+      onUpdateAvailable,
+    });
+    updateChecker.start();
+
     rebuildTrayMenu();
 
     // Retroactive spend history (reads existing logs; no database). The
@@ -462,5 +548,6 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     if (monitor) monitor.stop();
     if (leaderboard) leaderboard.stop();
+    if (updateChecker) updateChecker.stop();
   });
 }
