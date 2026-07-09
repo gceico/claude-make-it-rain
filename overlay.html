@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Make It Rain overlay</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    pointer-events: none;
+    user-select: none;
+  }
+  .emoji {
+    position: absolute;
+    top: 0;
+    left: 0;
+    will-change: transform, opacity;
+    line-height: 1;
+  }
+</style>
+</head>
+<body>
+<script>
+  let activeCount = 0;
+  let idleTimer = null;
+
+  function animationStarted() {
+    activeCount++;
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  }
+
+  function animationEnded() {
+    activeCount--;
+    if (activeCount <= 0) {
+      activeCount = 0;
+      // Debounce so staggered spawns don't hide the window between emoji.
+      idleTimer = setTimeout(() => {
+        if (activeCount === 0) window.bridge.overlayIdle();
+      }, 500);
+    }
+  }
+
+  function spawnEmoji({ symbol, size, x, y, dx, dy, rotation, duration, fade }) {
+    const el = document.createElement('div');
+    el.className = 'emoji';
+    el.textContent = symbol;
+    el.style.fontSize = size + 'px';
+    el.style.transform = `translate(${x}px, ${y}px)`;
+    document.body.appendChild(el);
+    animationStarted();
+
+    const keyframes = [
+      { transform: `translate(${x}px, ${y}px) rotate(0rad)`, opacity: 1 },
+      { transform: `translate(${x + dx}px, ${y + dy}px) rotate(${rotation}rad)`, opacity: fade ? 0 : 1 },
+    ];
+    const anim = el.animate(keyframes, {
+      duration: duration * 1000,
+      easing: 'ease-in',
+      fill: 'forwards',
+    });
+    anim.onfinish = () => {
+      el.remove();
+      animationEnded();
+    };
+  }
+
+  const rand = (min, max) => min + Math.random() * (max - min);
+
+  // Dollar-fly: bills dropping away from the tray item, staggered ~120ms apart.
+  function flyBills({ count, anchor }) {
+    const capped = Math.max(0, Math.min(count, 10));
+    for (let i = 0; i < capped; i++) {
+      setTimeout(() => {
+        spawnEmoji({
+          symbol: '💵',
+          size: 28,
+          x: anchor.x + anchor.width / 2 - 14 + rand(-6, 6),
+          y: anchor.y + anchor.height,
+          dx: rand(-60, 60),
+          dy: rand(150, 250),
+          rotation: rand(-0.6, 0.6),
+          duration: 1.8,
+          fade: true,
+        });
+      }, i * 120);
+    }
+  }
+
+  // $100 celebration: full-screen shower of money emoji for ~6s.
+  const RAIN_EMOJI = ['💵', '💸', '💰', '🤑'];
+  let raining = false;
+
+  function rain() {
+    // If a rain is already showing, let it keep running rather than stacking.
+    if (raining) return;
+    raining = true;
+    setTimeout(() => { raining = false; }, 6000);
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    for (let i = 0; i < 60; i++) {
+      setTimeout(() => {
+        const size = rand(20, 48);
+        spawnEmoji({
+          symbol: RAIN_EMOJI[Math.floor(Math.random() * RAIN_EMOJI.length)],
+          size,
+          x: rand(0, Math.max(1, W - size)),
+          y: -size * 1.5,
+          dx: rand(-80, 80),
+          dy: H + size * 3,
+          rotation: rand(-3, 3),
+          duration: rand(2.5, 5),
+          fade: false,
+        });
+      }, rand(0, 1500));
+    }
+  }
+
+  window.bridge.onFlyBills(flyBills);
+  window.bridge.onRain(rain);
+</script>
+</body>
+</html>

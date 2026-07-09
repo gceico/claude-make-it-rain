@@ -1,0 +1,45 @@
+{
+  "name": "make-it-rain",
+  "version": "1.0.0",
+  "description": "Satirical menu bar app that estimates today's Claude Code spend and makes it rain",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/you/make-it-rain-electron.git"
+  },
+  "main": "main.js",
+  "bin": {
+    "make-it-rain": "bin/make-it-rain.js"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "electron",
+    "tray",
+    "menubar",
+    "claude",
+    "overlay"
+  ],
+  "files": [
+    "main.js",
+    "preload.js",
+    "overlay.html",
+    "lib",
+    "bin/make-it-rain.js",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node test/usage-monitor.test.js"
+  },
+  "dependencies": {
+    "electron": "^43.0.0"
+  }
+}
