@@ -33,8 +33,27 @@ function entry({ ts, model, reqId, msgId, input, output, cacheRead = 0, cacheCre
 }
 
 // ── Pricing unit checks ──────────────────────────────────────────────────────
-assert.deepStrictEqual(pricingForModel('claude-sonnet-5'), { inputPerMillion: 3, outputPerMillion: 15 });
+// Current model coverage, verified against Anthropic's published per-model
+// pricing (2026-07). Keeps the tool from drifting away from `/cost` / ccusage.
 assert.deepStrictEqual(pricingForModel('claude-fable-5'), { inputPerMillion: 10, outputPerMillion: 50 });
+assert.deepStrictEqual(pricingForModel('claude-mythos-5'), { inputPerMillion: 10, outputPerMillion: 50 });
+assert.deepStrictEqual(pricingForModel('claude-opus-4-8'), { inputPerMillion: 5, outputPerMillion: 25 });
+assert.deepStrictEqual(pricingForModel('claude-opus-4-7'), { inputPerMillion: 5, outputPerMillion: 25 });
+assert.deepStrictEqual(pricingForModel('claude-opus-4-6'), { inputPerMillion: 5, outputPerMillion: 25 });
+assert.deepStrictEqual(pricingForModel('claude-sonnet-5'), { inputPerMillion: 3, outputPerMillion: 15 });
+assert.deepStrictEqual(pricingForModel('claude-sonnet-4-6'), { inputPerMillion: 3, outputPerMillion: 15 });
+assert.deepStrictEqual(pricingForModel('claude-haiku-4-5'), { inputPerMillion: 1, outputPerMillion: 5 });
+// Old Opus 4.0/4.1 kept their historical $15/$75 rate.
+assert.deepStrictEqual(pricingForModel('claude-opus-4-1'), { inputPerMillion: 15, outputPerMillion: 75 });
+// Synthetic / local markers are never billed → $0 (ccusage skips them). Prior
+// behaviour charged them at the default rate, over-counting spend.
+assert.deepStrictEqual(pricingForModel('<synthetic>'), { inputPerMillion: 0, outputPerMillion: 0 });
+assert.strictEqual(
+  costForEntry({ inputTokens: 1e6, outputTokens: 1e6, cacheReadInputTokens: 1e6, cacheCreationInputTokens: 1e6, cacheCreationBreakdown: null }, '<synthetic>'),
+  0, 'synthetic entries must cost $0 even with tokens'
+);
+// Unknown *real* model id (and null) falls back to Opus-tier so it doesn't vanish.
+assert.deepStrictEqual(pricingForModel('claude-brand-new-9'), { inputPerMillion: 5, outputPerMillion: 25 });
 assert.deepStrictEqual(pricingForModel(null), { inputPerMillion: 5, outputPerMillion: 25 });
 
 const approx = (actual, expected, label) =>
@@ -57,6 +76,14 @@ approx(
     'claude-sonnet-5'
   ),
   3 * 1.25 + 3 * 2, 'cache creation breakdown'
+);
+// no breakdown: cache creation defaults to the 5m rate (1.25x input)
+approx(
+  costForEntry(
+    { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 1e6, cacheCreationBreakdown: null },
+    'claude-sonnet-5'
+  ),
+  3 * 1.25, 'cache creation without breakdown = 5m rate'
 );
 console.log('pricing: OK');
 
@@ -129,6 +156,43 @@ let stackCount = 0;
 for (const m of STACK_MILESTONES) if (crossed(5, 55, m.threshold)) stackCount = m.count;
 assert.strictEqual(stackCount, 3, 'a $5→$55 jump fires the $50 stack (highest crossed)');
 console.log('milestone crossing math: OK');
+
+// ── Deterministic dedup on re-read (file truncation/rotation) ───────────────
+// An id-less entry must not double-count when the file shrinks below the
+// consumed offset and gets re-read from the start. The stable top-level `uuid`
+// is the dedup fallback; a random UUID here would recount on the re-scan.
+const projectsDir2 = path.join(tmpRoot, 'projects2');
+const projectDir2 = path.join(projectsDir2, 'rotated-project');
+fs.mkdirSync(projectDir2, { recursive: true });
+const file2 = path.join(projectDir2, 'session2.jsonl');
+
+// Entry with NO message.id, only a top-level uuid. 1M output on sonnet = $15.
+const idlessEntry = JSON.stringify({
+  type: 'assistant',
+  timestamp: todayISO,
+  requestId: 'rr1',
+  uuid: 'stable-uuid-1',
+  message: { model: 'claude-sonnet-5', usage: { input_tokens: 0, output_tokens: 1_000_000 } },
+});
+// Filler makes the initial file large so the later rewrite is strictly shorter,
+// forcing the offset-reset / re-read path in processFile.
+const filler = entry({ ts: todayISO, model: 'claude-sonnet-5', reqId: 'rr2', msgId: 'mm2', input: 0, output: 0 });
+fs.writeFileSync(file2, idlessEntry + '\n' + filler + '\n');
+
+const monitor2 = new UsageMonitor({ projectsDir: projectsDir2 });
+monitor2.tick(true);
+const afterFirst = monitor2.snapshot.totalCostUSD;
+assert.ok(Math.abs(afterFirst - 15) < 1e-9, `expected $15 after first scan, got ${afterFirst}`);
+
+// Rewrite the file with ONLY the id-less entry — now shorter than the consumed
+// offset, triggering a full re-read from byte 0.
+fs.writeFileSync(file2, idlessEntry + '\n');
+monitor2.tick(false);
+assert.ok(
+  Math.abs(monitor2.snapshot.totalCostUSD - 15) < 1e-9,
+  `id-less entry double-counted on re-read: got ${monitor2.snapshot.totalCostUSD}, expected $15`
+);
+console.log('deterministic dedup on re-read: OK');
 
 fs.rmSync(tmpRoot, { recursive: true, force: true });
 console.log('\nAll tests passed.');
