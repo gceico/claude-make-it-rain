@@ -165,3 +165,16 @@ commit and workflow run that built it.
   app simply shows `$0.00` and keeps polling.
 - No state is persisted across restarts — it rescans today's logs on launch.
 - Animations render on the primary display only.
+
+## Who's behind this
+
+I'm Gabriel. I build things like this for fun and for my own work, and ship the
+ones that turn out good.
+
+Day job: I run [**Aibl.to**](https://aibl.to) with Nizar. We do hands-on
+workshops where teams take the work they already know and turn it into AI
+agents that compound.
+
+If that sounds like your team, [come say hi](https://aibl.to).
+
+— Gabriel
