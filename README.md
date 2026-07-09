@@ -147,9 +147,10 @@ You can also edit it by hand: set `"telemetryEnabled": false`, change
 
 Because no personal data is collected and the tag is anonymous, random, and
 user-changeable, there is nothing to identify you by — consistent with GDPR data
-minimization. Disabling telemetry stops all network activity. If the server is
-unreachable (the default URL is a placeholder), the client fails silently: no
-errors, no crashes, no retry storms.
+minimization. Disabling telemetry stops all network activity. The client points
+at the reference server at [aiburn.dev](https://aiburn.dev) by default; if it is
+ever unreachable the client fails silently: no errors, no crashes, no retry
+storms.
 
 ### Running the backend yourself
 
@@ -162,6 +163,8 @@ node server/index.js          # listens on http://localhost:8787
 
 - `POST /api/report` — body `{ "tag": "...", "total": 12.34 }`
 - `GET  /api/leaderboard` — today's top tags as JSON
+- `GET  /api/stars` — the repo's GitHub star count, fetched server-side and
+  cached ~10 min (the page can't call GitHub directly under its strict CSP)
 - `GET  /` — the landing page (`server/public/index.html`)
 
 State lives in a small SQLite database (`server/data/leaderboard.db`, git-ignored),

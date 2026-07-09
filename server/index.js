@@ -10,6 +10,7 @@
  * Endpoints:
  *   POST /api/report        body { tag: string, total: number } -> { ok, total }
  *   GET  /api/leaderboard   -> { date, entries: [{ tag, total }] } (today only)
+ *   GET  /api/stars         -> { stars: number|null } (GitHub stars, cached)
  *   GET  /                  -> static landing page (server/public/index.html)
  *   GET  /health            -> { ok: true }
  *
@@ -35,6 +36,55 @@ const TAG_MAX_LENGTH = 32;
 // finite, renderable numbers in the store.
 const MAX_TOTAL = 1e12;
 
+// GitHub repo whose star count powers the "Star on GitHub" pill. The page can't
+// call api.github.com directly (its CSP pins connect-src to 'self'), so the
+// server fetches the count, caches it in memory, and exposes it same-origin at
+// GET /api/stars. Unauthenticated GitHub allows 60 req/hr per IP; a 10-minute
+// cache keeps us to ~6/hr and serves the last good value if GitHub is slow or
+// down. Override the repo with GITHUB_REPO if this ever gets forked.
+const GITHUB_REPO = process.env.GITHUB_REPO || 'gceico/claude-make-it-rain';
+const STARS_TTL_MS = 10 * 60 * 1000;
+const STARS_FETCH_TIMEOUT_MS = 4000;
+const starsCache = { stars: null, fetchedAt: 0 };
+let starsInFlight = null;
+
+async function fetchStarCount() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), STARS_FETCH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'make-it-rain-leaderboard',
+      },
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) throw new Error(`github status ${resp.status}`);
+    const data = await resp.json();
+    const n = data && data.stargazers_count;
+    if (typeof n === 'number' && isFinite(n)) {
+      starsCache.stars = n;
+      starsCache.fetchedAt = Date.now();
+    }
+  } catch {
+    // Fail silently: keep serving the last cached value (or null on cold start).
+  } finally {
+    clearTimeout(timer);
+  }
+  return starsCache.stars;
+}
+
+// Returns the cached count immediately when fresh; otherwise refreshes (de-duping
+// concurrent refreshes) and never rejects — callers always get a { stars } shape.
+async function getStarCount() {
+  const fresh = Date.now() - starsCache.fetchedAt < STARS_TTL_MS;
+  if (fresh && starsCache.stars !== null) return starsCache.stars;
+  if (!starsInFlight) {
+    starsInFlight = fetchStarCount().finally(() => { starsInFlight = null; });
+  }
+  return starsInFlight;
+}
+
 // Strict Content-Security-Policy for the leaderboard page. The page is a single
 // self-contained file with one inline <script> and inline <style>, so inline is
 // allowed, but every external/remote capability is denied — defense-in-depth on
@@ -45,6 +95,7 @@ const CSP =
   "style-src 'unsafe-inline'; " +
   "connect-src 'self'; " +
   "img-src 'self' data:; " +
+  "font-src data:; " +
   "base-uri 'none'; " +
   "form-action 'none'; " +
   "frame-ancestors 'none'";
@@ -119,6 +170,8 @@ function serveStatic(res, urlPath) {
     const type = ext === '.html' ? 'text/html; charset=utf-8'
       : ext === '.css' ? 'text/css; charset=utf-8'
       : ext === '.js' ? 'text/javascript; charset=utf-8'
+      : ext === '.svg' ? 'image/svg+xml; charset=utf-8'
+      : ext === '.png' ? 'image/png'
       : 'application/octet-stream';
     const headers = { 'content-type': type, 'x-content-type-options': 'nosniff' };
     if (ext === '.html') headers['content-security-policy'] = CSP;
@@ -136,6 +189,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && pathname === '/api/report') return handleReport(req, res);
   if (req.method === 'GET' && pathname === '/api/leaderboard') {
     return sendJSON(res, 200, { date: LeaderboardDB.today(), entries: db.leaderboard() });
+  }
+  if (req.method === 'GET' && pathname === '/api/stars') {
+    return getStarCount().then((stars) => sendJSON(res, 200, { stars }));
   }
   if (req.method === 'GET' && pathname === '/health') return sendJSON(res, 200, { ok: true });
   if (req.method === 'GET') return serveStatic(res, pathname);

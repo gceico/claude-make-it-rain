@@ -89,6 +89,11 @@ const configFile = (dir) => path.join(dir, 'config.json');
     'legacy placeholder with trailing slash also migrates'
   );
   assert.strictEqual(
+    normalizeConfig({ apiBaseUrl: 'https://claude-make-it-rain-production.up.railway.app' }).apiBaseUrl,
+    DEFAULT_API_BASE_URL,
+    'the retired Railway reference URL migrates to the current default'
+  );
+  assert.strictEqual(
     normalizeConfig({ apiBaseUrl: 'https://my-own-leaderboard.example.org' }).apiBaseUrl,
     'https://my-own-leaderboard.example.org',
     'genuine custom URL is preserved'
