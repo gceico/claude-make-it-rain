@@ -8,6 +8,7 @@ const {
   LeaderboardClient,
   generateTag,
   sanitizeTag,
+  isSafeHttpUrl,
   normalizeConfig,
   loadConfig,
   saveConfig,
@@ -93,6 +94,57 @@ const configFile = (dir) => path.join(dir, 'config.json');
     'genuine custom URL is preserved'
   );
   console.log('legacy apiBaseUrl migration: OK');
+}
+
+// ── Security: apiBaseUrl scheme allow-list + tag re-sanitization on LOAD ─────
+// A malicious/corrupt config.json is a real attack vector: apiBaseUrl is fed to
+// fetch() AND shell.openExternal(), and a gamerTag read from disk must never
+// bypass sanitize. Both are neutralized in normalizeConfig, i.e. on every LOAD.
+{
+  // Non-http(s) schemes are rejected outright.
+  for (const bad of [
+    'javascript:alert(1)',
+    'file:///etc/passwd',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    'ftp://host/x',
+    'not a url',
+    '//evil.com',
+    '',
+  ]) {
+    assert.strictEqual(isSafeHttpUrl(bad), false, `isSafeHttpUrl rejects ${JSON.stringify(bad)}`);
+    assert.strictEqual(
+      normalizeConfig({ apiBaseUrl: bad }).apiBaseUrl,
+      DEFAULT_API_BASE_URL,
+      `malicious apiBaseUrl ${JSON.stringify(bad)} -> default`
+    );
+  }
+  // Genuine http(s) URLs are allowed through.
+  assert.strictEqual(isSafeHttpUrl('http://ok.example'), true);
+  assert.strictEqual(isSafeHttpUrl('https://ok.example/x'), true);
+  assert.strictEqual(
+    normalizeConfig({ apiBaseUrl: 'https://my-server.example.org' }).apiBaseUrl,
+    'https://my-server.example.org',
+    'safe https URL preserved'
+  );
+
+  // A gamerTag full of HTML on disk is stripped to a safe handle on load, so it
+  // can never round-trip to a DOM/tray sink as markup.
+  const evil = normalizeConfig({ gamerTag: '<img src=x onerror=alert(1)>' });
+  assert.strictEqual(evil.gamerTag, 'imgsrcxonerroralert1', 'HTML gamerTag sanitized on load');
+  assert.ok(!/[<>"'&]/.test(evil.gamerTag), 'no HTML-significant chars survive load');
+
+  // End-to-end via loadConfig() reading a hostile file straight off disk.
+  const dir = path.join(tmpRoot, 'evil-config');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    configFile(dir),
+    JSON.stringify({ apiBaseUrl: 'file:///etc/passwd', gamerTag: '"><script>x</script>' })
+  );
+  const loaded = loadConfig(dir);
+  assert.strictEqual(loaded.apiBaseUrl, DEFAULT_API_BASE_URL, 'file: URL neutralized on load');
+  assert.strictEqual(loaded.gamerTag, 'scriptxscript', 'HTML tag neutralized on load');
+  console.log('security: apiBaseUrl scheme allow-list + tag re-sanitization on load: OK');
 }
 
 // ── First-run creation + persistence round-trip ──────────────────────────────

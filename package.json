@@ -47,7 +47,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "test": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/leaderboard-db.test.js && node test/history.test.js && node test/update-checker.test.js",
+    "test": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/leaderboard-db.test.js && node test/leaderboard-server.test.js && node test/history.test.js && node test/update-checker.test.js",
     "prepublishOnly": "npm test"
   },
   "dependencies": {
