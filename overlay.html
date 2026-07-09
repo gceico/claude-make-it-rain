@@ -86,28 +86,35 @@
     animateFalling(el, motion);
   }
 
+  // How many 💵 layers make up one "money stack" (a $10 milestone = one such
+  // stack; $50 = five of them). The payload from main doesn't carry this, so
+  // it's a renderer-side default.
+  const BILLS_PER_STACK = 10;
+
   // Builds a layered stack of bills — a richer visual than a lone 💵.
-  function makeStack(size) {
+  // With 10 layers the per-layer offset/rotation is much smaller than the old
+  // 4-layer fan, so the wad still reads as ONE thick stack and keeps roughly
+  // the same overall footprint.
+  function makeStack(size, layers = BILLS_PER_STACK) {
     const el = document.createElement('div');
     el.className = 'emoji stack';
     el.style.width = size + 'px';
     el.style.height = size + 'px';
-    const layers = 4;
     for (let i = 0; i < layers; i++) {
       const bill = document.createElement('span');
       bill.textContent = '💵';
       bill.style.fontSize = size + 'px';
-      // Fan the bills: stagger upward and tilt each one a little.
-      bill.style.top = (-i * size * 0.16) + 'px';
-      bill.style.left = ((i - (layers - 1) / 2) * size * 0.06) + 'px';
-      bill.style.transform = `rotate(${(i - (layers - 1) / 2) * 4}deg)`;
+      // Fan the bills: stagger upward and tilt each one a touch.
+      bill.style.top = (-i * size * 0.055) + 'px';
+      bill.style.left = ((i - (layers - 1) / 2) * size * 0.02) + 'px';
+      bill.style.transform = `rotate(${(i - (layers - 1) / 2) * 1.5}deg)`;
       el.appendChild(bill);
     }
     return el;
   }
 
-  function spawnStack({ size, ...motion }) {
-    animateFalling(makeStack(size), motion);
+  function spawnStack({ size, billsPerStack, ...motion }) {
+    animateFalling(makeStack(size, billsPerStack), motion);
   }
 
   const rand = (min, max) => min + Math.random() * (max - min);
@@ -132,34 +139,27 @@
     }
   }
 
-  // Milestone reward: one or more "stacks" of money bursting from the tray
-  // anchor. Bigger and denser than a single fly-bill so hitting $10/$50 feels
-  // like a genuine payout. `count` stacks are staggered so a few of them read
-  // as an escalating celebration (e.g. count=1 for $10, count=3 for $50).
-  const STACK_EMOJI = ['💰', '💵', '🤑'];
-
+  // Milestone reward: `count` thick money stacks bursting from the tray
+  // anchor — each one a fanned wad of BILLS_PER_STACK bills (see makeStack),
+  // so hitting a milestone feels like a genuine payout rather than a lone 💵.
+  // Stacks are staggered so several read as an escalating celebration
+  // (count=1 for $10, count=5 for $50; $100 gets the full-screen rain).
   function moneyStacks({ count, anchor }) {
     const stacks = Math.max(1, Math.min(count || 1, 5));
     const cx = anchor ? anchor.x + anchor.width / 2 - 24 : window.innerWidth / 2;
     const cy = anchor ? anchor.y + anchor.height : 60;
-    const perStack = 10;
     for (let s = 0; s < stacks; s++) {
       setTimeout(() => {
-        for (let i = 0; i < perStack; i++) {
-          setTimeout(() => {
-            spawnEmoji({
-              symbol: STACK_EMOJI[Math.floor(Math.random() * STACK_EMOJI.length)],
-              size: rand(38, 58),
-              x: cx + rand(-20, 20),
-              y: cy,
-              dx: rand(-160, 160),
-              dy: rand(200, 380),
-              rotation: rand(-1.6, 1.6),
-              duration: rand(1.6, 2.4),
-              fade: true,
-            });
-          }, i * 45);
-        }
+        spawnStack({
+          size: rand(40, 52),
+          x: cx + rand(-30, 30),
+          y: cy,
+          dx: rand(-160, 160),
+          dy: rand(220, 380),
+          rotation: rand(-1.2, 1.2),
+          duration: rand(1.8, 2.6),
+          fade: true,
+        });
       }, s * 220);
     }
   }
