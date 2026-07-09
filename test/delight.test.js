@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const denominations = require('../lib/denominations');
 const { Config, DEFAULTS } = require('../lib/config');
+const { STACK_MILESTONES, stackCountForCrossing } = require('../lib/milestones');
 
 // ── Denominations: $100 = 💰, $1 = 💵, 1¢ = 🪙 ───────────────────────────────
 assert.deepStrictEqual(denominations.breakdown(234.50), { stacks: 2, bills: 34, coins: 50 });
@@ -53,5 +54,29 @@ assert.strictEqual(c4.get('somethingElse'), 42);
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log('config (persist, defaults, corrupt tolerance): OK');
+
+// ── Milestone stacks: $10 → 1 stack, $50 → 5 stacks ($100 is rain, not here) ─
+assert.deepStrictEqual(STACK_MILESTONES, [
+  { threshold: 10, count: 1 },
+  { threshold: 50, count: 5 },
+]);
+// Crossing a threshold fires its count.
+assert.strictEqual(stackCountForCrossing(9.5, 10), 1);
+assert.strictEqual(stackCountForCrossing(9.99, 12.3), 1);
+assert.strictEqual(stackCountForCrossing(49, 50.25), 5);
+// Crossing several thresholds in one update fires only the highest.
+assert.strictEqual(stackCountForCrossing(5, 60), 5);
+// No crossing → no stacks (already past, or still below).
+assert.strictEqual(stackCountForCrossing(10, 12), 0);
+assert.strictEqual(stackCountForCrossing(0, 9.99), 0);
+assert.strictEqual(stackCountForCrossing(51, 80), 0);
+// $100+ without touching $10/$50 boundaries stays a rain matter, not stacks.
+assert.strictEqual(stackCountForCrossing(99, 150), 0);
+
+// The overlay renders each milestone stack as a 10-bill fanned wad.
+const overlayHtml = fs.readFileSync(path.join(__dirname, '..', 'overlay.html'), 'utf8');
+assert.match(overlayHtml, /const BILLS_PER_STACK = 10;/,
+  'overlay.html should render 10 bills per stack');
+console.log('milestones (tiers 1/5, crossing rules, 10 bills per stack): OK');
 
 console.log('\nAll delight tests passed.');

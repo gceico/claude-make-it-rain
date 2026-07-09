@@ -7,6 +7,7 @@ const { Config } = require('./lib/config');
 const denominations = require('./lib/denominations');
 const { LeaderboardClient } = require('./lib/leaderboard-client');
 const { History, RANGES, billCount } = require('./lib/history');
+const { stackCountForCrossing } = require('./lib/milestones');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -22,14 +23,6 @@ let history = null;
 // rangeId -> scan result (or 'loading'); drives the "Past spending" submenu.
 const historyData = new Map();
 const HISTORY_REFRESH_MS = 60_000;
-
-// First-time-today spend milestones that earn a "stack of money" burst.
-// $100 is intentionally NOT here — it keeps the existing full-screen rain below.
-// Ordered ascending so we can fire only the highest one crossed in a single update.
-const STACK_MILESTONES = [
-  { threshold: 10, count: 1 },  // $10: a single stack bursts from the tray.
-  { threshold: 50, count: 3 },  // $50: a few stacks.
-];
 
 // 16x16 green square fallback for platforms without tray title text (win/linux).
 const FALLBACK_ICON_B64 =
@@ -83,7 +76,7 @@ function historyMenuItem(range) {
       };
     });
   const submenu = dayItems.length
-    ? [...dayItems, { type: 'separator' }, { label: 'Make it rain 💸', click: () => makeItRainFor(range.id) }]
+    ? dayItems
     : [{ label: 'No spend in this range', enabled: false }];
 
   return { label, submenu };
@@ -132,7 +125,7 @@ function rebuildTrayMenu() {
       label: 'Test animations',
       submenu: [
         { label: 'Stack of Money — $10', click: () => stacksFromTray(1) },
-        { label: 'A Few Stacks — $50', click: () => stacksFromTray(3) },
+        { label: 'Five Stacks — $50', click: () => stacksFromTray(5) },
         { label: 'Make It Rain — $100', click: () => rainAllDisplays() },
       ],
     },
@@ -346,17 +339,12 @@ function handleUpdate(previousTotal, snapshot) {
     flyBillsFromTray(dollarsGained);
   }
 
-  // Milestone stacks ($10, $50): fire the first time today's total crosses the
-  // threshold (previousTotal < M <= newTotal). Deriving from the crossing means
-  // the flags reset for free at midnight — the monitor resets its total to $0,
-  // so the next day's climb crosses each threshold afresh. If several are crossed
-  // in one update, fire only the highest to avoid stacking bursts on top of each
-  // other. Skipped on the initial scan (see above).
+  // Milestone stacks ($10 → one 10-bill stack, $50 → five): fire the first
+  // time today's total crosses the threshold. The thresholds/counts and the
+  // crossing rules (midnight reset for free, highest-only on multi-cross)
+  // live in lib/milestones.js. Skipped on the initial scan (see above).
   if (!isInitialScan) {
-    let stackCount = 0;
-    for (const m of STACK_MILESTONES) {
-      if (previousTotal < m.threshold && newTotal >= m.threshold) stackCount = m.count;
-    }
+    const stackCount = stackCountForCrossing(previousTotal, newTotal);
     if (stackCount > 0) {
       stacksFromTray(stackCount);
     }
@@ -392,26 +380,14 @@ function refreshHistory({ force = false } = {}) {
   }
 }
 
-/** Make-it-rain for a past range: one $100 downpour if it hit any bill stack. */
-function makeItRainFor(rangeId) {
-  if (!history) return;
-  history
-    .get(rangeId, { force: true })
-    .then((data) => {
-      historyData.set(rangeId, data);
-      rebuildTrayMenu();
-      const bills = billCount(data.totalCostUSD);
-      if (bills > 0) {
-        flyBillsFromTray(bills);
-        rainAllDisplays();
-      }
-    })
-    .catch((err) => {
-      console.warn(`MakeItRain: make-it-rain scan for ${rangeId} failed:`, err.message);
-    });
-}
-
 // ── App lifecycle ───────────────────────────────────────────────────────────
+// MIR_TEST_USER_DATA=/path  points a test launch at its own userData dir so it
+// neither collides with a running real instance (the single-instance lock is
+// scoped to userData) nor pollutes its config. Pre-seed the dir's config.json
+// with {"telemetryEnabled": false} to keep test launches off the leaderboard.
+if (process.env.MIR_TEST_USER_DATA) {
+  app.setPath('userData', process.env.MIR_TEST_USER_DATA);
+}
 if (!app.requestSingleInstanceLock()) {
   console.log('MakeItRain: already running, exiting.');
   app.quit();
@@ -457,9 +433,15 @@ if (!app.requestSingleInstanceLock()) {
 
     // Launch hooks for testing without clicking the menu:
     //   MIR_TEST_RAIN=1  triggers the rain animation after 1.5s
+    //   MIR_TEST_STACK=<n>  bursts <n> milestone money stacks after 3s (so the
+    //                       4s MIR_TEST_SHOT below catches them mid-fall)
     //   MIR_TEST_SHOT=/path.png  captures the overlay to a PNG a few seconds later
     if (process.env.MIR_TEST_RAIN === '1') {
       setTimeout(() => rainAllDisplays(), 1500);
+    }
+    if (process.env.MIR_TEST_STACK) {
+      const n = parseInt(process.env.MIR_TEST_STACK, 10) || 1;
+      setTimeout(() => stacksFromTray(n), 3000);
     }
     if (process.env.MIR_TEST_SHOT) {
       setTimeout(async () => {
