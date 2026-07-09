@@ -5,7 +5,7 @@ const { spawn } = require('child_process');
 let electronBinary;
 try {
   electronBinary = require('electron');
-} catch (e) {
+} catch {
   console.error('Could not load Electron. Try: npm install -g make-it-rain');
   process.exit(1);
 }

@@ -86,11 +86,24 @@ immediately.
   the amount lives in the tooltip and the context menu (a green square is
   shown as the icon).
 - Click the tray item for a menu with today's total, today's input/output
-  token counts, a **Make It Rain (test)** item to preview the rain animation,
-  and **Quit**.
+  token counts, **Make It Rain (test)** / **Stack of Money — $10** /
+  **Five Stacks — $50** items to preview each animation, the daily-leaderboard
+  controls (see privacy section below), and **Quit**.
 - A 💵 flies off the tray item every time the running total crosses a whole
-  dollar; crossing every $100 multiple plays a ~6-second full-screen shower
-  of 💵💸💰🤑. The overlay is click-through and only exists while animating.
+  dollar. Bigger milestones burst thick **money stacks** from the tray the
+  first time today's total crosses them — **$10** fires one stack of 10 bills,
+  **$50** fires five — and crossing every **$100** multiple plays a ~6-second
+  full-screen shower of 💵💸💰🤑. The overlay is click-through and only exists
+  while animating.
+
+### Staying up to date
+
+Make It Rain checks npm once a day (fail-silently — a missing network never
+disturbs the app) to see whether a newer version has been published. When one
+is available it shows a one-time desktop notification and adds an
+**⬆️ Update to vX.Y.Z** item to the top of the tray menu; clicking it runs
+`npm install -g @gceico/claude-make-it-rain@latest` for you and then prompts
+you to quit and relaunch to apply the update.
 
 ## How it works
 
@@ -103,11 +116,83 @@ immediately.
 - Entries are deduplicated by `requestId:messageId` since the same entry can
   appear more than once across files.
 
+## Daily leaderboard & privacy (GDPR)
+
+Make It Rain has an optional **cloud leaderboard of the day**: a friendly ranking
+of who made it rain hardest today, by anonymized tag.
+
+**👉 See the live board at [aiburn.dev](https://aiburn.dev)** — it resets every
+day (UTC) and shows the top anonymized tags along with the repo's GitHub star
+count.
+
+![The daily leaderboard](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/leaderboard.gif)
+
+### What is sent
+
+Exactly two things, once an hour:
+
+- your **anonymized gamer tag** (e.g. `TurboLlama7392`), generated randomly on
+  first run and stored locally;
+- **today's estimated total** in USD.
+
+That's it. **No** account, email, IP-derived identity, file paths, project
+names, model names, prompts, or any other data leaves your machine. The server
+does not log IPs or per-user metadata, stores only `tag → max daily total`, and
+resets every day (UTC) — old days are pruned automatically.
+
+### It's opt-out, clearly disclosed, and easy to disable
+
+Telemetry is **on by default** but fully under your control from the tray menu:
+
+- **Share on daily leaderboard** — a checkbox to turn reporting on/off instantly.
+- **New random tag** — reroll your anonymous tag any time.
+- **View leaderboard…** — opens the landing page in your browser.
+- **Leaderboard tag: …** — shows the exact tag being used.
+
+Your choice is saved in a local config file (`config.json` under Electron's
+`userData` directory — e.g. `~/Library/Application Support/make-it-rain/` on
+macOS, `~/.config/make-it-rain/` on Linux, `%APPDATA%\make-it-rain\` on Windows).
+You can also edit it by hand: set `"telemetryEnabled": false`, change
+`"gamerTag"`, or repoint `"apiBaseUrl"`.
+
+Because no personal data is collected and the tag is anonymous, random, and
+user-changeable, there is nothing to identify you by — consistent with GDPR data
+minimization. Disabling telemetry stops all network activity. The client points
+at the reference server at [aiburn.dev](https://aiburn.dev) by default; if it is
+ever unreachable the client fails silently: no errors, no crashes, no retry
+storms.
+
+### Running the backend yourself
+
+The server is a tiny, zero-dependency Node HTTP app under `server/`. Point the
+client at it via `apiBaseUrl` in `config.json`.
+
+```bash
+node server/index.js          # listens on http://localhost:8787
+```
+
+- `POST /api/report` — body `{ "tag": "...", "total": 12.34 }`
+- `GET  /api/leaderboard` — today's top tags as JSON
+- `GET  /api/stars` — the repo's GitHub star count, fetched server-side and
+  cached ~10 min (the page can't call GitHub directly under its strict CSP)
+- `GET  /` — the landing page (`server/public/index.html`)
+
+State lives in a small SQLite database (`server/data/leaderboard.db`, git-ignored),
+backed by the built-in `node:sqlite` module — still zero npm dependencies. The
+server therefore needs **Node >= 22** (where `node:sqlite` landed), even though
+the desktop app itself runs on Node 18+. Set `LEADERBOARD_DB` to override the
+file path.
+
+The reference server deploys to [Railway](https://railway.com) with `railway up ./server`,
+built from `server/Dockerfile` (`node:24-alpine`, no npm install, sleeps when idle;
+persistent volume mounted at `/data`, `LEADERBOARD_DB=/data/leaderboard.db`).
+
 ## Testing & debug hooks
 
 ```bash
 npm test                                  # unit tests (pure Node, no Electron window)
 MIR_TEST_RAIN=1 npm start                 # trigger the $100 rain 1.5s after launch
+MIR_TEST_STACK=5 npm start                # burst 5 money stacks 3s after launch
 MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after launch
 ```
 
@@ -120,11 +205,22 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   reset (pure Node, no Electron — unit-testable).
 - `lib/pricing.js` — per-model USD/1M-token pricing table and per-entry cost
   calculation (pure Node).
+- `lib/milestones.js` — first-time-today spend milestones ($10/$50) that burst
+  money stacks, and the crossing math that fires only the highest one (pure
+  Node, no Electron — unit-testable).
+- `lib/leaderboard-client.js` — anonymized-tag generation, config persistence,
+  telemetry toggle, and hourly fail-silent reporting to the cloud leaderboard
+  (pure Node, no Electron — unit-testable).
+- `server/` — tiny zero-dependency Node HTTP backend (`index.js` + `db.js`, a
+  `node:sqlite` store) and the leaderboard landing page (`public/index.html`).
+  Deploys to Railway with `railway up ./server`.
 - `overlay.html` + `preload.js` — transparent, click-through, always-on-top
   fullscreen overlay that renders the dollar-fly and money-rain animations,
   hiding itself when idle.
 - `test/usage-monitor.test.js` — pricing math, dedup, day filtering,
   incremental/partial-line reads, crossing math.
+- `test/leaderboard-client.test.js` — tag generation/sanitization, config
+  first-run/stability/recovery, telemetry toggle, and fail-silent reporting.
 - `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 18/20/22)
   and the npm publish pipeline.
 

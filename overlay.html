@@ -21,6 +21,18 @@
     will-change: transform, opacity;
     line-height: 1;
   }
+  /* A "money stack": several bills layered with slight offsets/rotation so
+     they read as a fanned wad of cash rather than a single 💵. */
+  .stack {
+    display: block;
+  }
+  .stack > span {
+    position: absolute;
+    left: 0;
+    top: 0;
+    line-height: 1;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+  }
 </style>
 </head>
 <body>
@@ -44,11 +56,9 @@
     }
   }
 
-  function spawnEmoji({ symbol, size, x, y, dx, dy, rotation, duration, fade }) {
-    const el = document.createElement('div');
-    el.className = 'emoji';
-    el.textContent = symbol;
-    el.style.fontSize = size + 'px';
+  // Animates any element falling from (x,y) by (dx,dy) while rotating, then
+  // cleans it up. Shared by single emoji and composed money stacks.
+  function animateFalling(el, { x, y, dx, dy, rotation, duration, fade }) {
     el.style.transform = `translate(${x}px, ${y}px)`;
     document.body.appendChild(el);
     animationStarted();
@@ -66,6 +76,45 @@
       el.remove();
       animationEnded();
     };
+  }
+
+  function spawnEmoji({ symbol, size, ...motion }) {
+    const el = document.createElement('div');
+    el.className = 'emoji';
+    el.textContent = symbol;
+    el.style.fontSize = size + 'px';
+    animateFalling(el, motion);
+  }
+
+  // How many 💵 layers make up one "money stack" (a $10 milestone = one such
+  // stack; $50 = five of them). The payload from main doesn't carry this, so
+  // it's a renderer-side default.
+  const BILLS_PER_STACK = 10;
+
+  // Builds a layered stack of bills — a richer visual than a lone 💵.
+  // With 10 layers the per-layer offset/rotation is much smaller than the old
+  // 4-layer fan, so the wad still reads as ONE thick stack and keeps roughly
+  // the same overall footprint.
+  function makeStack(size, layers = BILLS_PER_STACK) {
+    const el = document.createElement('div');
+    el.className = 'emoji stack';
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    for (let i = 0; i < layers; i++) {
+      const bill = document.createElement('span');
+      bill.textContent = '💵';
+      bill.style.fontSize = size + 'px';
+      // Fan the bills: stagger upward and tilt each one a touch.
+      bill.style.top = (-i * size * 0.055) + 'px';
+      bill.style.left = ((i - (layers - 1) / 2) * size * 0.02) + 'px';
+      bill.style.transform = `rotate(${(i - (layers - 1) / 2) * 1.5}deg)`;
+      el.appendChild(bill);
+    }
+    return el;
+  }
+
+  function spawnStack({ size, billsPerStack, ...motion }) {
+    animateFalling(makeStack(size, billsPerStack), motion);
   }
 
   const rand = (min, max) => min + Math.random() * (max - min);
@@ -90,24 +139,97 @@
     }
   }
 
+  // Milestone reward: `count` thick money stacks bursting from the tray
+  // anchor — each one a fanned wad of BILLS_PER_STACK bills (see makeStack),
+  // so hitting a milestone feels like a genuine payout rather than a lone 💵.
+  // Stacks are staggered so several read as an escalating celebration
+  // (count=1 for $10, count=5 for $50; $100 gets the full-screen rain).
+  function moneyStacks({ count, anchor }) {
+    const stacks = Math.max(1, Math.min(count || 1, 5));
+    const cx = anchor ? anchor.x + anchor.width / 2 - 24 : window.innerWidth / 2;
+    const cy = anchor ? anchor.y + anchor.height : 60;
+    for (let s = 0; s < stacks; s++) {
+      setTimeout(() => {
+        spawnStack({
+          size: rand(40, 52),
+          x: cx + rand(-30, 30),
+          y: cy,
+          dx: rand(-160, 160),
+          dy: rand(220, 380),
+          rotation: rand(-1.2, 1.2),
+          duration: rand(1.8, 2.6),
+          fade: true,
+        });
+      }, s * 220);
+    }
+  }
+
+  // ── Coin/shimmer sound (Web Audio, synthesized — no audio files) ────────────
+  let muted = false;
+  let audioCtx = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+    }
+    // The overlay window is non-focusable and gets no user gesture, so the
+    // context can start (or get) suspended. Resuming here is a defensive
+    // complement to the main-process autoplayPolicy override.
+    if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+    return audioCtx;
+  }
+
+  // A single bright, fast-decaying "ting".
+  function ting(ctx, when, freq, peakGain) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(peakGain, when + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + 0.26);
+  }
+
+  // A short, quiet cascade of coin tings to accompany the rain.
+  function playCoinShimmer() {
+    if (muted) return;
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const NOTES = [1568, 2093, 2637, 3136, 3520]; // sparkly upper-register set
+    const start = ctx.currentTime;
+    for (let i = 0; i < 7; i++) {
+      const freq = NOTES[Math.floor(Math.random() * NOTES.length)] * (0.99 + Math.random() * 0.02);
+      ting(ctx, start + i * 0.07 + Math.random() * 0.02, freq, 0.05);
+    }
+  }
+
   // $100 celebration: full-screen shower of money emoji for ~6s.
   const RAIN_EMOJI = ['💵', '💸', '💰', '🤑'];
   let raining = false;
 
-  function rain() {
+  function rain(payload) {
     // If a rain is already showing, let it keep running rather than stacking.
     if (raining) return;
     raining = true;
     setTimeout(() => { raining = false; }, 6000);
+
+    // With one overlay per display, main tells only the primary display to
+    // play the shimmer ({sound: true}) so it isn't layered once per screen.
+    // An absent payload keeps the pre-multi-display behaviour: play (still
+    // subject to the mute preference inside playCoinShimmer).
+    if (payload ? !!payload.sound : true) playCoinShimmer();
 
     const W = window.innerWidth;
     const H = window.innerHeight;
     for (let i = 0; i < 60; i++) {
       setTimeout(() => {
         const size = rand(20, 48);
-        spawnEmoji({
-          symbol: RAIN_EMOJI[Math.floor(Math.random() * RAIN_EMOJI.length)],
-          size,
+        const motion = {
           x: rand(0, Math.max(1, W - size)),
           y: -size * 1.5,
           dx: rand(-80, 80),
@@ -115,13 +237,21 @@
           rotation: rand(-3, 3),
           duration: rand(2.5, 5),
           fade: false,
-        });
+        };
+        // Sprinkle in some fat money stacks amongst the single emoji.
+        if (Math.random() < 0.2) {
+          spawnStack({ size: size * 1.1, ...motion });
+        } else {
+          spawnEmoji({ symbol: RAIN_EMOJI[Math.floor(Math.random() * RAIN_EMOJI.length)], size, ...motion });
+        }
       }, rand(0, 1500));
     }
   }
 
   window.bridge.onFlyBills(flyBills);
+  window.bridge.onStack(moneyStacks);
   window.bridge.onRain(rain);
+  window.bridge.onSetMuted((m) => { muted = m; });
 </script>
 </body>
 </html>

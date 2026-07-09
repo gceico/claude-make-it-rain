@@ -1,2 +1,25 @@
+# Dependencies
 node_modules/
 *.tgz
+
+# App data
+server/data/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local tool caches
+.impeccable/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

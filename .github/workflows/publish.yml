@@ -1,28 +1,78 @@
 name: Publish to npm
 
-# Publishes when you cut a GitHub Release (which creates the git tag).
-# Create the release from a tag like `v1.0.0` that matches package.json.
+# Publishes the package to npm whenever a version tag (vX.Y.Z) is pushed. The
+# usual flow is `npm version patch && git push --follow-tags`. Publishing a
+# GitHub Release also works, since that creates and pushes the tag.
+#
+# Authentication uses npm Trusted Publishing (OIDC) — there is NO npm token
+# anywhere in this workflow, and no .npmrc with credentials. Instead, GitHub
+# mints a short-lived OIDC token that npm verifies against the Trusted
+# Publisher configured for this package on npmjs.com. This is why the job
+# needs `id-token: write` below (see the permissions block).
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+
+    # Permissions are critical for OIDC-based Trusted Publishing:
+    #   - contents: read  -> allows checkout of the repo
+    #   - id-token: write -> allows GitHub to mint the OIDC token that npm
+    #                        uses to authenticate the publish. Without this
+    #                        the publish would have no credentials at all,
+    #                        since we intentionally provide no npm token.
     permissions:
       contents: read
-      id-token: write # enables npm provenance
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm publish --access public --provenance
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing (OIDC) requires a recent npm. It landed in npm
+      # 11.5.1, and the npm bundled with Node may be older, so upgrade to latest.
+      - name: Upgrade npm (Trusted Publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
+
+      # Guard against publishing a version that doesn't match the release tag.
+      # The release tag (github.ref_name) may be prefixed with "v" (e.g.
+      # v1.0.1); strip a leading "v" and compare against package.json "version".
+      - name: Verify package version matches release tag
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "package.json version: $PKG_VERSION"
+          echo "release tag version:  $TAG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match release tag ($TAG_VERSION). Aborting publish."
+            exit 1
+          fi
+
+      # Install dependencies from the committed package-lock.json. Electron is a
+      # dependency but the test suite is pure Node, so skip downloading the
+      # large Electron binary to keep CI fast.
+      - name: Install dependencies
+        run: npm ci
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      - name: Run tests
+        run: npm test
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      # Publish with provenance. No NODE_AUTH_TOKEN / .npmrc token is set:
+      # authentication comes entirely from the OIDC id-token granted above,
+      # and --provenance produces a signed provenance attestation.
+      # --access public is required because this is a scoped package
+      # (@gceico/claude-make-it-rain).
+      - name: Publish to npm (Trusted Publishing + provenance)
+        run: npm publish --access public --provenance

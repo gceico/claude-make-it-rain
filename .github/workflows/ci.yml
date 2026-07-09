@@ -6,7 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Actions are SHA-pinned (not @v4) so a re-pointed tag can't run unexpected code.
+# Comments track the human-readable version; bump the SHA + comment together
+# (Dependabot does this automatically).
 jobs:
+  # Full suite (app + leaderboard server). The server uses node:sqlite, which is
+  # a Node 22.5+ builtin, so the full suite only runs on 22+.
   test:
     name: test (node ${{ matrix.node }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -14,16 +19,50 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [18, 20, 22]
+        node: [22, 24]
     env:
       # The unit tests are pure Node and never launch a window, so there is no
       # need to download the ~100 MB Electron binary during `npm ci`.
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm test
+
+  # The published app supports Node 18+ (it never touches node:sqlite), so prove
+  # the app test suite still runs on the older baseline the README advertises.
+  test-app-legacy:
+    name: test:app (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:app
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
