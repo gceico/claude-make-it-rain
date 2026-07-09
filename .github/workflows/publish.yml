@@ -1,14 +1,17 @@
 name: Publish to npm
 
-# Publishes the package to npm whenever a GitHub Release is published.
+# Publishes the package to npm whenever a version tag (vX.Y.Z) is pushed. The
+# usual flow is `npm version patch && git push --follow-tags`. Publishing a
+# GitHub Release also works, since that creates and pushes the tag.
+#
 # Authentication uses npm Trusted Publishing (OIDC) — there is NO npm token
 # anywhere in this workflow, and no .npmrc with credentials. Instead, GitHub
 # mints a short-lived OIDC token that npm verifies against the Trusted
 # Publisher configured for this package on npmjs.com. This is why the job
 # needs `id-token: write` below (see the permissions block).
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 jobs:
   publish:
