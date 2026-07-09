@@ -90,6 +90,38 @@
     }
   }
 
+  // Milestone reward: one or more "stacks" of money bursting from the tray
+  // anchor. Bigger and denser than a single fly-bill so hitting $10/$50 feels
+  // like a genuine payout. `count` stacks are staggered so a few of them read
+  // as an escalating celebration (e.g. count=1 for $10, count=3 for $50).
+  const STACK_EMOJI = ['💰', '💵', '🤑'];
+
+  function moneyStacks({ count, anchor }) {
+    const stacks = Math.max(1, Math.min(count || 1, 5));
+    const cx = anchor ? anchor.x + anchor.width / 2 - 24 : window.innerWidth / 2;
+    const cy = anchor ? anchor.y + anchor.height : 60;
+    const perStack = 10;
+    for (let s = 0; s < stacks; s++) {
+      setTimeout(() => {
+        for (let i = 0; i < perStack; i++) {
+          setTimeout(() => {
+            spawnEmoji({
+              symbol: STACK_EMOJI[Math.floor(Math.random() * STACK_EMOJI.length)],
+              size: rand(38, 58),
+              x: cx + rand(-20, 20),
+              y: cy,
+              dx: rand(-160, 160),
+              dy: rand(200, 380),
+              rotation: rand(-1.6, 1.6),
+              duration: rand(1.6, 2.4),
+              fade: true,
+            });
+          }, i * 45);
+        }
+      }, s * 220);
+    }
+  }
+
   // $100 celebration: full-screen shower of money emoji for ~6s.
   const RAIN_EMOJI = ['💵', '💸', '💰', '🤑'];
   let raining = false;
@@ -121,6 +153,7 @@
   }
 
   window.bridge.onFlyBills(flyBills);
+  window.bridge.onStack(moneyStacks);
   window.bridge.onRain(rain);
 </script>
 </body>
