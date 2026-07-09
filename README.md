@@ -92,6 +92,15 @@ immediately.
   dollar; crossing every $100 multiple plays a ~6-second full-screen shower
   of 💵💸💰🤑. The overlay is click-through and only exists while animating.
 
+### Staying up to date
+
+Make It Rain checks npm once a day (fail-silently — a missing network never
+disturbs the app) to see whether a newer version has been published. When one
+is available it shows a one-time desktop notification and adds an
+**⬆️ Update to vX.Y.Z** item to the top of the tray menu; clicking it runs
+`npm install -g @gceico/claude-make-it-rain@latest` for you and then prompts
+you to quit and relaunch to apply the update.
+
 ## How it works
 
 - Polls `~/.claude/projects/*/*.jsonl` every 3 seconds, incrementally reading
