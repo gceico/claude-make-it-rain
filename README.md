@@ -24,8 +24,7 @@ The dollar figure is a rough estimate from per-token pricing.
 npm install -g @gceico/claude-make-it-rain
 ```
 
-The installed CLI is called `make-it-rain` (the npm scope only affects the
-package name, not the command).
+This installs the `claude-make-it-rain` command.
 
 ### From a git checkout
 
@@ -41,8 +40,8 @@ npm install
 git clone https://github.com/gceico/claude-make-it-rain
 cd claude-make-it-rain
 npm install
-npm link            # makes the global `make-it-rain` command point at this checkout
-make-it-rain        # runs your local copy
+npm link                     # makes the global `claude-make-it-rain` command point at this checkout
+claude-make-it-rain          # runs your local copy
 # ...
 npm unlink -g @gceico/claude-make-it-rain   # undo when you're done
 ```
@@ -52,7 +51,7 @@ npm unlink -g @gceico/claude-make-it-rain   # undo when you're done
 Installed globally:
 
 ```bash
-make-it-rain
+claude-make-it-rain
 ```
 
 That's it — the app detaches from the terminal and lives in your tray/menu
