@@ -8,8 +8,7 @@
 A menu bar app that tracks your Claude Code spend today. **Every $1 spent flies
 a 💵 off the menu bar — and every $100 makes it rain.** 💸
 
-Just a joke app: the dollar figure is a rough estimate from per-token pricing,
-not an official number from Anthropic.
+The dollar figure is a rough estimate from per-token pricing.
 
 ## Requirements
 
