@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, screen, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, screen, shell, session } = require('electron');
 const path = require('path');
 const { execFile } = require('child_process');
 const { UsageMonitor } = require('./lib/usage-monitor');
@@ -10,6 +10,17 @@ const { LeaderboardClient } = require('./lib/leaderboard-client');
 const { History, RANGES, billCount } = require('./lib/history');
 const { stackCountForCrossing } = require('./lib/milestones');
 const { UpdateChecker, shouldNotify } = require('./lib/update-checker');
+
+// We only ever play synthesized output audio (Web Audio oscillators in the
+// overlay) — nothing here captures audio. On macOS, Chromium's audio stack can
+// still initialize a CoreAudio *input* unit when an AudioContext starts, which
+// trips the OS microphone-permission prompt (attributed to the launching
+// terminal, since the CLI isn't a signed .app bundle). As a belt-and-suspenders
+// against any capture path ever opening the real device, route media streams to
+// a fake device. The authoritative fix is the permission handlers registered in
+// whenReady() below. Switches must be set before app is ready, so this lives at
+// module top level.
+app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -471,6 +482,14 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+
+    // This app never needs the microphone, camera, or any other gated device.
+    // Deny every permission request/check so Chromium never escalates to the OS
+    // (and the user never sees a stray mic prompt from the launching terminal).
+    const ses = session.defaultSession;
+    ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    ses.setPermissionCheckHandler(() => false);
+    if (ses.setDevicePermissionHandler) ses.setDevicePermissionHandler(() => false);
 
     config = new Config(path.join(app.getPath('userData'), 'config.json'));
 
