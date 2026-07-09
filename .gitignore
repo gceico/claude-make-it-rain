@@ -24,4 +24,7 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Claude Code — track shared settings only; ignore local scratch
 .claude/*
+!.claude/settings.json
+.claude/settings.local.json
