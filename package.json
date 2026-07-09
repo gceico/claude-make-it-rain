@@ -22,7 +22,7 @@
     "win32"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0"
   },
   "keywords": [
     "electron",
@@ -47,7 +47,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "test": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/history.test.js",
+    "test": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/leaderboard-db.test.js && node test/history.test.js",
     "prepublishOnly": "npm test"
   },
   "dependencies": {

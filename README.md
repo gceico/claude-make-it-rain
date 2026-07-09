@@ -144,8 +144,8 @@ errors, no crashes, no retry storms.
 
 ### Running the backend yourself
 
-The server is a tiny, zero-dependency Node HTTP app under `server/` (not deployed
-by this repo). Point the client at it via `apiBaseUrl` in `config.json`.
+The server is a tiny, zero-dependency Node HTTP app under `server/`. Point the
+client at it via `apiBaseUrl` in `config.json`.
 
 ```bash
 node server/index.js          # listens on http://localhost:8787
@@ -155,7 +155,12 @@ node server/index.js          # listens on http://localhost:8787
 - `GET  /api/leaderboard` — today's top tags as JSON
 - `GET  /` — the landing page (`server/public/index.html`)
 
-State lives in a small JSON file (`server/data/leaderboard.json`, git-ignored).
+State lives in a small SQLite database (`server/data/leaderboard.db`, git-ignored),
+backed by the built-in `node:sqlite` module — still zero npm dependencies (requires
+Node >= 24). Set `LEADERBOARD_DB` to override the file path.
+
+The reference server deploys to [Railway](https://railway.com) with `railway up ./server`
+(persistent volume mounted at `/data`, `LEADERBOARD_DB=/data/leaderboard.db`).
 
 ## Testing & debug hooks
 
@@ -177,9 +182,9 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
 - `lib/leaderboard-client.js` — anonymized-tag generation, config persistence,
   telemetry toggle, and hourly fail-silent reporting to the cloud leaderboard
   (pure Node, no Electron — unit-testable).
-- `server/` — tiny zero-dependency Node HTTP backend (`index.js` + `db.js`) and
-  the leaderboard landing page (`public/index.html`). Self-contained, not
-  deployed by this repo.
+- `server/` — tiny zero-dependency Node HTTP backend (`index.js` + `db.js`, a
+  `node:sqlite` store) and the leaderboard landing page (`public/index.html`).
+  Deploys to Railway with `railway up ./server`.
 - `overlay.html` + `preload.js` — transparent, click-through, always-on-top
   fullscreen overlay that renders the dollar-fly and money-rain animations,
   hiding itself when idle.

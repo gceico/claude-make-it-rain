@@ -3,8 +3,9 @@
 /**
  * Make It Rain — cloud daily-leaderboard server.
  *
- * Zero-dependency Node HTTP server. Self-contained; NOT deployed by this repo.
+ * Zero-dependency Node HTTP server (SQLite state via the built-in node:sqlite).
  * Run locally with:  node server/index.js   (listens on :8787 by default)
+ * Deploys to Railway with:  railway up ./server
  *
  * Endpoints:
  *   POST /api/report        body { tag: string, total: number } -> { ok, total }
@@ -23,7 +24,7 @@ const path = require('path');
 const { LeaderboardDB } = require('./db');
 
 const PORT = Number(process.env.PORT) || 8787;
-const DATA_FILE = process.env.LEADERBOARD_DATA || path.join(__dirname, 'data', 'leaderboard.json');
+const DATA_FILE = process.env.LEADERBOARD_DB || path.join(__dirname, 'data', 'leaderboard.db');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY_BYTES = 4 * 1024; // reports are tiny; reject anything larger
 const TAG_MAX_LENGTH = 32;
