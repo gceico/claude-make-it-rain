@@ -1,7 +1,7 @@
 # Make It Rain 💸
 
 [![CI](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml/badge.svg)](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@gceico/make-it-rain)](https://www.npmjs.com/package/@gceico/make-it-rain)
+[![npm](https://img.shields.io/npm/v/@gceico/claude-make-it-rain)](https://www.npmjs.com/package/@gceico/claude-make-it-rain)
 
 ![Make It Rain in action](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/make-it-rain.gif)
 
@@ -21,7 +21,7 @@ The dollar figure is a rough estimate from per-token pricing.
 ### From npm
 
 ```bash
-npm install -g @gceico/make-it-rain
+npm install -g @gceico/claude-make-it-rain
 ```
 
 The installed CLI is called `make-it-rain` (the npm scope only affects the
@@ -44,7 +44,7 @@ npm install
 npm link            # makes the global `make-it-rain` command point at this checkout
 make-it-rain        # runs your local copy
 # ...
-npm unlink -g @gceico/make-it-rain   # undo when you're done
+npm unlink -g @gceico/claude-make-it-rain   # undo when you're done
 ```
 
 ## Run
