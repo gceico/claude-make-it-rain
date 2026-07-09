@@ -86,11 +86,15 @@ immediately.
   the amount lives in the tooltip and the context menu (a green square is
   shown as the icon).
 - Click the tray item for a menu with today's total, today's input/output
-  token counts, a **Make It Rain (test)** item to preview the rain animation,
-  the daily-leaderboard controls (see privacy section below), and **Quit**.
+  token counts, **Make It Rain (test)** / **Stack of Money — $10** /
+  **Five Stacks — $50** items to preview each animation, the daily-leaderboard
+  controls (see privacy section below), and **Quit**.
 - A 💵 flies off the tray item every time the running total crosses a whole
-  dollar; crossing every $100 multiple plays a ~6-second full-screen shower
-  of 💵💸💰🤑. The overlay is click-through and only exists while animating.
+  dollar. Bigger milestones burst thick **money stacks** from the tray the
+  first time today's total crosses them — **$10** fires one stack of 10 bills,
+  **$50** fires five — and crossing every **$100** multiple plays a ~6-second
+  full-screen shower of 💵💸💰🤑. The overlay is click-through and only exists
+  while animating.
 
 ### Staying up to date
 
@@ -116,6 +120,12 @@ you to quit and relaunch to apply the update.
 
 Make It Rain has an optional **cloud leaderboard of the day**: a friendly ranking
 of who made it rain hardest today, by anonymized tag.
+
+**👉 See the live board at [aiburn.dev](https://aiburn.dev)** — it resets every
+day (UTC) and shows the top anonymized tags along with the repo's GitHub star
+count.
+
+![The daily leaderboard](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/leaderboard.gif)
 
 ### What is sent
 
@@ -182,6 +192,7 @@ persistent volume mounted at `/data`, `LEADERBOARD_DB=/data/leaderboard.db`).
 ```bash
 npm test                                  # unit tests (pure Node, no Electron window)
 MIR_TEST_RAIN=1 npm start                 # trigger the $100 rain 1.5s after launch
+MIR_TEST_STACK=5 npm start                # burst 5 money stacks 3s after launch
 MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after launch
 ```
 
@@ -194,6 +205,9 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   reset (pure Node, no Electron — unit-testable).
 - `lib/pricing.js` — per-model USD/1M-token pricing table and per-entry cost
   calculation (pure Node).
+- `lib/milestones.js` — first-time-today spend milestones ($10/$50) that burst
+  money stacks, and the crossing math that fires only the highest one (pure
+  Node, no Electron — unit-testable).
 - `lib/leaderboard-client.js` — anonymized-tag generation, config persistence,
   telemetry toggle, and hourly fail-silent reporting to the cloud leaderboard
   (pure Node, no Electron — unit-testable).
