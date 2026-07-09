@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Make It Rain — Leaderboard of the Day</title>
+  <style>
+    :root {
+      --bg: #0b1020; --card: #131a30; --ink: #eef2ff; --muted: #93a0c4;
+      --accent: #35d07f; --gold: #ffd23f; --line: #223052;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #1a2540 0, var(--bg) 60%), var(--bg);
+      background-color: var(--bg); color: var(--ink); min-height: 100vh;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 40px 20px 80px; }
+    header { text-align: center; margin-bottom: 28px; }
+    h1 { font-size: 2rem; margin: 0 0 6px; }
+    .sub { color: var(--muted); margin: 0; }
+    .date { color: var(--gold); font-weight: 600; }
+    .board { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-top: 1px solid var(--line); }
+    .row:first-child { border-top: none; }
+    .rank { width: 2ch; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .tag { flex: 1; font-weight: 600; word-break: break-all; }
+    .amt { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+    .row.top1 .rank, .row.top1 .amt { color: var(--gold); }
+    .empty, .err { text-align: center; color: var(--muted); padding: 40px 20px; }
+    footer { text-align: center; color: var(--muted); margin-top: 26px; font-size: 0.85rem; }
+    .medal { width: 1.4em; display: inline-block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>💸 Make It Rain</h1>
+      <p class="sub">Leaderboard of the day — <span class="date" id="date">…</span></p>
+      <p class="sub">Top anonymized Claude Code spenders. Resets daily (UTC).</p>
+    </header>
+    <div class="board" id="board"><div class="empty">Loading…</div></div>
+    <footer>
+      Only an anonymous tag + today's estimated total are shown. No accounts, no personal data.
+    </footer>
+  </div>
+
+  <script>
+    var medals = ['🥇', '🥈', '🥉'];
+    function money(n) { return '$' + Number(n).toFixed(2); }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function render(data) {
+      document.getElementById('date').textContent = data.date || '';
+      var board = document.getElementById('board');
+      var entries = (data.entries || []);
+      if (!entries.length) {
+        board.innerHTML = '<div class="empty">Nobody has made it rain yet today. Be the first! ☔️</div>';
+        return;
+      }
+      board.innerHTML = entries.map(function (e, i) {
+        var badge = i < 3 ? '<span class="medal">' + medals[i] + '</span>' : (i + 1);
+        return '<div class="row' + (i === 0 ? ' top1' : '') + '">' +
+          '<div class="rank">' + badge + '</div>' +
+          '<div class="tag">' + esc(e.tag) + '</div>' +
+          '<div class="amt">' + money(e.total) + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    fetch('/api/leaderboard')
+      .then(function (r) { if (!r.ok) throw new Error('bad status'); return r.json(); })
+      .then(render)
+      .catch(function () {
+        document.getElementById('board').innerHTML =
+          '<div class="err">Could not load the leaderboard right now. Try again later.</div>';
+      });
+  </script>
+</body>
+</html>
