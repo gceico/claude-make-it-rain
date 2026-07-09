@@ -1,11 +1,16 @@
 {
-  "name": "make-it-rain",
+  "name": "@gceico/make-it-rain",
   "version": "1.0.0",
   "description": "Satirical menu bar app that estimates today's Claude Code spend and makes it rain",
   "license": "MIT",
+  "author": "Gabriel Ceicoschi <ceicoschi.gabriel@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/you/make-it-rain-electron.git"
+    "url": "git+https://github.com/gceico/claude-make-it-rain.git"
+  },
+  "homepage": "https://github.com/gceico/claude-make-it-rain#readme",
+  "bugs": {
+    "url": "https://github.com/gceico/claude-make-it-rain/issues"
   },
   "main": "main.js",
   "bin": {
@@ -24,6 +29,7 @@
     "tray",
     "menubar",
     "claude",
+    "claude-code",
     "overlay"
   ],
   "files": [
@@ -32,12 +38,17 @@
     "overlay.html",
     "lib",
     "bin/make-it-rain.js",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "test": "node test/usage-monitor.test.js"
+    "test": "node test/usage-monitor.test.js",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "electron": "^43.0.0"

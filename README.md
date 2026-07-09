@@ -1,5 +1,8 @@
 # Make It Rain 💸
 
+[![CI](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml/badge.svg)](https://github.com/gceico/claude-make-it-rain/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@gceico/make-it-rain)](https://www.npmjs.com/package/@gceico/make-it-rain)
+
 A satirical tray/menu bar app that watches your Claude Code session logs and
 shows an estimated running total of *today's* Claude spend. Every whole dollar
 spent flies a 💵 off the tray icon, and crossing every $100 triggers a
@@ -17,18 +20,33 @@ authoritative number from Anthropic.
 
 ## Install
 
-### From npm (once published)
+### From npm
 
 ```bash
-npm install -g make-it-rain
+npm install -g @gceico/make-it-rain
 ```
+
+The installed CLI is called `make-it-rain` (the npm scope only affects the
+package name, not the command).
 
 ### From a git checkout
 
 ```bash
-git clone https://github.com/you/make-it-rain-electron
-cd make-it-rain-electron
+git clone https://github.com/gceico/claude-make-it-rain
+cd claude-make-it-rain
 npm install
+```
+
+### Local development install (link the global CLI to your checkout)
+
+```bash
+git clone https://github.com/gceico/claude-make-it-rain
+cd claude-make-it-rain
+npm install
+npm link            # makes the global `make-it-rain` command point at this checkout
+make-it-rain        # runs your local copy
+# ...
+npm unlink -g @gceico/make-it-rain   # undo when you're done
 ```
 
 ## Run
@@ -110,6 +128,33 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   hiding itself when idle.
 - `test/usage-monitor.test.js` — pricing math, dedup, day filtering,
   incremental/partial-line reads, crossing math.
+- `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 18/20/22)
+  and the npm publish pipeline.
+
+## Releasing (maintainers)
+
+Publishing is automated by `.github/workflows/publish.yml`, which runs the
+tests and `npm publish` whenever a **GitHub Release** is published.
+
+One-time setup:
+
+1. Create an npm **automation** access token
+   (npm → *Access Tokens* → *Generate* → *Automation*).
+2. Add it to the repo as a secret named `NPM_TOKEN`
+   (`gh secret set NPM_TOKEN`).
+
+To cut a release:
+
+```bash
+npm version patch          # bumps package.json + creates a git tag (e.g. v1.0.1)
+git push --follow-tags
+gh release create v1.0.1 --generate-notes   # this triggers the publish workflow
+```
+
+The first publish of the scoped package goes out as public (configured via
+`publishConfig.access` in `package.json`, and `--access public` in the
+workflow). Provenance is enabled, so the package links back to the exact
+commit and workflow run that built it.
 
 ## Caveats
 
