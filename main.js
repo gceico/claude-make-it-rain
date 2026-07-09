@@ -3,6 +3,8 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
 const path = require('path');
 const { UsageMonitor } = require('./lib/usage-monitor');
+const { Config } = require('./lib/config');
+const denominations = require('./lib/denominations');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -10,6 +12,7 @@ let tray = null;
 // Each entry: { win: BrowserWindow, ready: boolean, pending: [{channel, payload}] }
 let overlays = new Map();
 let monitor = null;
+let config = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 let initialScanHandled = false;
 
@@ -41,17 +44,38 @@ function formatTitle(total) {
 
 function rebuildTrayMenu() {
   const s = latestSnapshot;
+  const muted = config ? !!config.get('muted') : false;
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
       { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
       { type: 'separator' },
+      {
+        label: 'See your wealth',
+        submenu: [
+          { label: denominations.format(s.totalCostUSD), enabled: false },
+          { type: 'separator' },
+          { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
+        ],
+      },
+      { type: 'separator' },
       { label: 'Stack of Money — $10 (test)', click: () => stacksFromTray(1) },
       { label: 'A Few Stacks — $50 (test)', click: () => stacksFromTray(3) },
       { label: 'Make It Rain — $100 (test)', click: () => rainAllDisplays() },
+      { label: 'Mute sounds', type: 'checkbox', checked: muted, click: (item) => setMuted(item.checked) },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
+}
+
+function setMuted(muted) {
+  if (config) config.set('muted', muted);
+  // Update every loaded overlay directly (bypassing queueToOverlay) so
+  // toggling mute never shows a hidden overlay window just to sync a flag.
+  for (const entry of overlays.values()) {
+    if (entry.ready) entry.win.webContents.send('set-muted', muted);
+  }
+  rebuildTrayMenu();
 }
 
 function applySnapshot(snapshot) {
@@ -107,6 +131,10 @@ function createOverlayForDisplay(display) {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      // The overlay is non-focusable and never receives a user gesture, so the
+      // default autoplay policy would leave its AudioContext suspended. Allow
+      // sound without a gesture (the renderer also resumes defensively).
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   makeOverlayFloat(win);
@@ -117,6 +145,8 @@ function createOverlayForDisplay(display) {
   win.loadFile('overlay.html');
   win.webContents.on('did-finish-load', () => {
     entry.ready = true;
+    // Sync the persisted mute preference every time this overlay (re)loads.
+    win.webContents.send('set-muted', config ? !!config.get('muted') : false);
     flushOverlay(entry);
   });
   win.on('closed', () => { overlays.delete(display.id); });
@@ -154,10 +184,14 @@ function flushOverlay(entry) {
   entry.pending = [];
 }
 
-// Rain plays everywhere.
+// Rain plays everywhere, but the coin shimmer plays only on the primary
+// display — otherwise every overlay would layer the same sound simultaneously.
 function rainAllDisplays() {
   ensureOverlays();
-  for (const entry of overlays.values()) queueToOverlay(entry, 'rain');
+  const primaryId = screen.getPrimaryDisplay().id;
+  for (const [displayId, entry] of overlays.entries()) {
+    queueToOverlay(entry, 'rain', { sound: displayId === primaryId });
+  }
 }
 
 // Resolve the overlay entry for the display containing the tray anchor, plus
@@ -262,6 +296,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
+
+    config = new Config(path.join(app.getPath('userData'), 'config.json'));
 
     tray = new Tray(getTrayIcon());
     applySnapshot(latestSnapshot);
