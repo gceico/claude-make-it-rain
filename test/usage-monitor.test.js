@@ -113,5 +113,22 @@ assert.strictEqual(Math.floor(4.45) - Math.floor(1.45), 3, '3 whole dollars cros
 assert.strictEqual(Math.floor(105 / 100) - Math.floor(95 / 100), 1, '$100 boundary crossed');
 console.log('crossing math: OK');
 
+// ── Milestone stack crossings used by main.js ────────────────────────────────
+// Milestones fire the first time today's total crosses M: previousTotal < M <= newTotal.
+// Because previousTotal resets to $0 at midnight (monitor _resetState), this also
+// resets the milestones for free the next day.
+const crossed = (prev, next, M) => prev < M && next >= M;
+assert.ok(crossed(9.5, 10.2, 10), '$10 milestone fires on first crossing');
+assert.ok(!crossed(10.2, 12, 10), '$10 milestone does not re-fire after crossing');
+assert.ok(crossed(48, 51, 50), '$50 milestone fires on first crossing');
+assert.ok(!crossed(51, 99, 50), '$50 milestone does not re-fire after crossing');
+assert.ok(crossed(0, 10, 10), 'exact landing on $10 counts as a crossing');
+// When several thresholds are crossed in one jump, main.js fires only the highest.
+const STACK_MILESTONES = [{ threshold: 10, count: 1 }, { threshold: 50, count: 3 }];
+let stackCount = 0;
+for (const m of STACK_MILESTONES) if (crossed(5, 55, m.threshold)) stackCount = m.count;
+assert.strictEqual(stackCount, 3, 'a $5→$55 jump fires the $50 stack (highest crossed)');
+console.log('milestone crossing math: OK');
+
 fs.rmSync(tmpRoot, { recursive: true, force: true });
 console.log('\nAll tests passed.');

@@ -11,6 +11,15 @@ let tray = null;
 let overlays = new Map();
 let monitor = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
+let initialScanHandled = false;
+
+// First-time-today spend milestones that earn a "stack of money" burst.
+// $100 is intentionally NOT here — it keeps the existing full-screen rain below.
+// Ordered ascending so we can fire only the highest one crossed in a single update.
+const STACK_MILESTONES = [
+  { threshold: 10, count: 1 },  // $10: a single stack bursts from the tray.
+  { threshold: 50, count: 3 },  // $50: a few stacks.
+];
 
 // 16x16 green square fallback for platforms without tray title text (win/linux).
 const FALLBACK_ICON_B64 =
@@ -37,7 +46,9 @@ function rebuildTrayMenu() {
       { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
       { label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`, enabled: false },
       { type: 'separator' },
-      { label: 'Make It Rain (test)', click: () => rainAllDisplays() },
+      { label: 'Stack of Money — $10 (test)', click: () => stacksFromTray(1) },
+      { label: 'A Few Stacks — $50 (test)', click: () => stacksFromTray(3) },
+      { label: 'Make It Rain — $100 (test)', click: () => rainAllDisplays() },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
@@ -149,9 +160,10 @@ function rainAllDisplays() {
   for (const entry of overlays.values()) queueToOverlay(entry, 'rain');
 }
 
-// Dollar-fly plays on whichever display holds the tray anchor. The anchor
-// arrives in global screen coordinates; convert to that display's local space.
-function flyBillsFromTray(count) {
+// Resolve the overlay entry for the display containing the tray anchor, plus
+// the anchor converted to that display's local coordinate space. Tray-anchored
+// animations (dollar-fly, milestone stacks) play only on that display.
+function trayDisplayTarget() {
   ensureOverlays();
   const a = trayAnchor();
   const center = {
@@ -162,7 +174,19 @@ function flyBillsFromTray(count) {
   const entry = createOverlayForDisplay(display);
   const { bounds } = display;
   const anchor = { x: a.x - bounds.x, y: a.y - bounds.y, width: a.width, height: a.height };
+  return { entry, anchor };
+}
+
+// Dollar-fly plays on whichever display holds the tray anchor.
+function flyBillsFromTray(count) {
+  const { entry, anchor } = trayDisplayTarget();
   queueToOverlay(entry, 'fly-bills', { count, anchor });
+}
+
+// Milestone stacks ($10/$50) burst from the tray anchor on its display.
+function stacksFromTray(count) {
+  const { entry, anchor } = trayDisplayTarget();
+  queueToOverlay(entry, 'stack', { count, anchor });
 }
 
 // A renderer reports it went idle; hide only that window (if nothing's queued).
@@ -194,10 +218,33 @@ function handleUpdate(previousTotal, snapshot) {
 
   const newTotal = snapshot.totalCostUSD;
 
+  // The very first onUpdate after start() is the initial scan: it jumps from $0
+  // to today's already-accumulated total. We suppress the new milestone stacks
+  // there so launching the app never replays the whole day's big celebrations.
+  // (Per-dollar fly-bills and the $100 rain keep their prior behavior unchanged.)
+  const isInitialScan = !initialScanHandled;
+  initialScanHandled = true;
+
   // Dollar-fly: number of whole-dollar boundaries crossed since the last update.
   const dollarsGained = Math.floor(newTotal) - Math.floor(previousTotal);
   if (dollarsGained > 0) {
     flyBillsFromTray(dollarsGained);
+  }
+
+  // Milestone stacks ($10, $50): fire the first time today's total crosses the
+  // threshold (previousTotal < M <= newTotal). Deriving from the crossing means
+  // the flags reset for free at midnight — the monitor resets its total to $0,
+  // so the next day's climb crosses each threshold afresh. If several are crossed
+  // in one update, fire only the highest to avoid stacking bursts on top of each
+  // other. Skipped on the initial scan (see above).
+  if (!isInitialScan) {
+    let stackCount = 0;
+    for (const m of STACK_MILESTONES) {
+      if (previousTotal < m.threshold && newTotal >= m.threshold) stackCount = m.count;
+    }
+    if (stackCount > 0) {
+      stacksFromTray(stackCount);
+    }
   }
 
   // $100-rain: trigger if we crossed at least one multiple of 100.
