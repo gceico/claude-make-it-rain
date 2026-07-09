@@ -6,6 +6,7 @@ const { UsageMonitor } = require('./lib/usage-monitor');
 const { Config } = require('./lib/config');
 const denominations = require('./lib/denominations');
 const { LeaderboardClient } = require('./lib/leaderboard-client');
+const { History, RANGES, billCount } = require('./lib/history');
 
 // ── Globals ─────────────────────────────────────────────────────────────────
 let tray = null;
@@ -17,6 +18,10 @@ let config = null;
 let leaderboard = null;
 let latestSnapshot = { totalCostUSD: 0, inputTokens: 0, outputTokens: 0, entryCount: 0 };
 let initialScanHandled = false;
+let history = null;
+// rangeId -> scan result (or 'loading'); drives the "Past spending" submenu.
+const historyData = new Map();
+const HISTORY_REFRESH_MS = 60_000;
 
 // First-time-today spend milestones that earn a "stack of money" burst.
 // $100 is intentionally NOT here — it keeps the existing full-screen rain below.
@@ -44,6 +49,46 @@ function formatTitle(total) {
   return `${emoji} $${total.toFixed(2)}`;
 }
 
+/** N × 💰, one per $100 spent (empty string below $100). */
+function billStacks(costUSD) {
+  return '💰'.repeat(billCount(costUSD));
+}
+
+/** Days in a scan whose own spend hit $100 — the "rain days". */
+function rainDayCount(days) {
+  return days.filter((d) => d.costUSD >= 100).length;
+}
+
+/** Builds the label + per-day submenu for one range from its scan result. */
+function historyMenuItem(range) {
+  const data = historyData.get(range.id);
+  if (!data || data === 'loading') {
+    return { label: `${range.label}: …`, enabled: false };
+  }
+
+  const stacks = billStacks(data.totalCostUSD);
+  const rainDays = rainDayCount(data.days);
+  let label = `${range.label}: $${data.totalCostUSD.toFixed(2)}`;
+  if (stacks) label += ` — ${stacks}`;
+  if (rainDays > 0) label += ` (${rainDays} rain day${rainDays === 1 ? '' : 's'})`;
+
+  // Per-day breakdown, most recent first, with 💰 per $100 that day.
+  const dayItems = [...data.days]
+    .reverse()
+    .map((d) => {
+      const s = billStacks(d.costUSD);
+      return {
+        label: `${d.date}: $${d.costUSD.toFixed(2)}${s ? '  ' + s : ''}`,
+        enabled: false,
+      };
+    });
+  const submenu = dayItems.length
+    ? [...dayItems, { type: 'separator' }, { label: 'Make it rain 💸', click: () => makeItRainFor(range.id) }]
+    : [{ label: 'No spend in this range', enabled: false }];
+
+  return { label, submenu };
+}
+
 function rebuildTrayMenu() {
   const s = latestSnapshot;
   const muted = config ? !!config.get('muted') : false;
@@ -59,6 +104,7 @@ function rebuildTrayMenu() {
         { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
       ],
     },
+    { label: 'Past spending', submenu: RANGES.map(historyMenuItem) },
   ];
 
   if (leaderboard) {
@@ -324,6 +370,47 @@ function handleUpdate(previousTotal, snapshot) {
   }
 }
 
+// ── Past-spending history ─────────────────────────────────────────────────────
+/** Lazily (re)scan every range in the background and refresh the menu as each
+ *  result lands. Never blocks the tray. Past days come from History's
+ *  immutable per-day ledger (built once per local day), so even a forced
+ *  refresh only re-reads files touched today — steady-state cost stays near
+ *  zero regardless of how much log history exists. */
+function refreshHistory({ force = false } = {}) {
+  if (!history) return;
+  for (const range of RANGES) {
+    if (!historyData.has(range.id)) historyData.set(range.id, 'loading');
+    history
+      .get(range.id, { force })
+      .then((data) => {
+        historyData.set(range.id, data);
+        rebuildTrayMenu();
+      })
+      .catch((err) => {
+        console.warn(`MakeItRain: history scan for ${range.id} failed:`, err.message);
+      });
+  }
+}
+
+/** Make-it-rain for a past range: one $100 downpour if it hit any bill stack. */
+function makeItRainFor(rangeId) {
+  if (!history) return;
+  history
+    .get(rangeId, { force: true })
+    .then((data) => {
+      historyData.set(rangeId, data);
+      rebuildTrayMenu();
+      const bills = billCount(data.totalCostUSD);
+      if (bills > 0) {
+        flyBillsFromTray(bills);
+        rainAllDisplays();
+      }
+    })
+    .catch((err) => {
+      console.warn(`MakeItRain: make-it-rain scan for ${rangeId} failed:`, err.message);
+    });
+}
+
 // ── App lifecycle ───────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
   console.log('MakeItRain: already running, exiting.');
@@ -360,6 +447,13 @@ if (!app.requestSingleInstanceLock()) {
     });
     leaderboard.start();
     rebuildTrayMenu();
+
+    // Retroactive spend history (reads existing logs; no database). The
+    // periodic force refresh is cheap: it only rescans files touched today.
+    history = new History({ cacheTtlMs: HISTORY_REFRESH_MS });
+    refreshHistory();
+    const historyTimer = setInterval(() => refreshHistory({ force: true }), HISTORY_REFRESH_MS);
+    if (historyTimer.unref) historyTimer.unref();
 
     // Launch hooks for testing without clicking the menu:
     //   MIR_TEST_RAIN=1  triggers the rain animation after 1.5s
