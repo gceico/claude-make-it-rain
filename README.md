@@ -223,6 +223,8 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   first-run/stability/recovery, telemetry toggle, and fail-silent reporting.
 - `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 18/20/22)
   and the npm publish pipeline.
+- `docs/DECISIONS.md` — architecture & decision log for the leaderboard,
+  deployment, publishing, and security/anti-cheat work.
 
 ## Releasing (maintainers)
 
