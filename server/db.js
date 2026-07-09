@@ -66,6 +66,14 @@ class LeaderboardDB {
     const yesterday = LeaderboardDB.today(new Date(Date.parse(today + 'T00:00:00Z') - 86400000));
     this._pruneStmt.run(today, yesterday);
   }
+
+  /**
+   * Close the underlying database handle. Frees the file so it can be deleted —
+   * matters on Windows, where an open SQLite handle blocks unlinking the file.
+   */
+  close() {
+    this.db.close();
+  }
 }
 
 module.exports = { LeaderboardDB };

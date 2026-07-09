@@ -50,8 +50,10 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/leaderboard-db.test.js && node test/leaderboard-server.test.js && node test/history.test.js && node test/update-checker.test.js",
-    "prepublishOnly": "npm test"
+    "test:app": "node test/usage-monitor.test.js && node test/delight.test.js && node test/leaderboard-client.test.js && node test/history.test.js && node test/update-checker.test.js",
+    "test:server": "node test/leaderboard-db.test.js && node test/leaderboard-server.test.js",
+    "test": "npm run test:app && npm run test:server",
+    "prepublishOnly": "npm run test:app"
   },
   "dependencies": {
     "electron": "^43.0.0"

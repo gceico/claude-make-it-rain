@@ -25,6 +25,7 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
 
   const board = db.leaderboard();
   assert.deepStrictEqual(board, [{ tag: 'TurboLlama7392', total: 12.34 }], 'round-trip');
+  db.close();
   console.log('report + leaderboard round-trip: OK');
 }
 
@@ -36,6 +37,7 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
   assert.strictEqual(db.report('SpicyOtter1', 8), 20, 'lower total does not clobber the max');
   const entry = db.leaderboard().find((e) => e.tag === 'SpicyOtter1');
   assert.strictEqual(entry.total, 20, 'stored total is the max ever seen');
+  db.close();
   console.log('upsert keeps max (latest cumulative figure): OK');
 }
 
@@ -48,6 +50,7 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
   db.report('Mid', 50, day);
   const totals = db.leaderboard(day).map((e) => e.total);
   assert.deepStrictEqual(totals, [100, 50, 1], 'sorted high-to-low');
+  db.close();
   console.log('sort order (descending by total): OK');
 }
 
@@ -62,6 +65,7 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
   assert.strictEqual(board[99].total, 51, '100th entry is the 100th-highest');
   // Explicit limit still honored.
   assert.strictEqual(db.leaderboard(day, 5).length, 5, 'explicit limit honored');
+  db.close();
   console.log('100 cap + explicit limit: OK');
 }
 
@@ -75,6 +79,7 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
     db.leaderboard(YESTERDAY).some((e) => e.tag === 'YesterdayTag'),
     'yesterday board still has its own entry'
   );
+  db.close();
   console.log('day isolation: OK');
 }
 
@@ -85,9 +90,11 @@ const OLD_DAY = LeaderboardDB.today(new Date(Date.parse(TODAY + 'T00:00:00Z') - 
   assert.ok(db.leaderboard(OLD_DAY).some((e) => e.tag === 'AncientTag'), 'old day present');
   db.report('FreshTag', 1, TODAY); // pruneOldDays keeps only today + yesterday
   assert.strictEqual(db.leaderboard(OLD_DAY).length, 0, 'old day pruned after a fresh report');
+  db.close();
   console.log('old-day pruning: OK');
 }
 
-fs.rmSync(tmpRoot, { recursive: true, force: true });
+// force + retries: on Windows the WAL sidecar files can linger a beat after close.
+fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 delete process.env.LEADERBOARD_DB;
 console.log('\nAll leaderboard-db tests passed.');

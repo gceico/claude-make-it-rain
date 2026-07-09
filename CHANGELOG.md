@@ -15,8 +15,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Corrected the declared Node.js engine to match the tested and documented
-  baseline (18+).
+- Clarified Node.js support: the desktop app requires Node 18+, while the
+  leaderboard server requires Node 22+ (it uses the `node:sqlite` builtin). CI
+  runs the full suite on 22/24 and the app-only suite on 18/20.
+
+### Fixed
+
+- Leaderboard tests now close the SQLite handle before deleting their temp
+  files, fixing an `EBUSY` failure on Windows.
 
 ### Security
 

@@ -23,7 +23,7 @@ const os = require('os');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mir-server-test-'));
 process.env.LEADERBOARD_DB = path.join(tmpDir, 'lb.db');
 
-const { server } = require('../server/index');
+const { server, db } = require('../server/index');
 
 function request(method, urlPath, body) {
   return new Promise((resolve, reject) => {
@@ -165,7 +165,8 @@ function rawPost(urlPath, rawBody) {
   }
 
   await new Promise((r) => server.close(r));
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  db.close(); // release the SQLite handle so Windows can delete the temp file
+  fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   console.log('\nAll leaderboard-server tests passed.');
 })().catch((err) => {
   console.error(err);

@@ -27,7 +27,9 @@ jobs:
       # Tokenless OIDC trusted publishing needs npm >= 11.5.1; Node 20 ships 10.x.
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm test
+      # The published package is the app only (server/ is excluded via "files"),
+      # so run the app test suite — it doesn't need node:sqlite (Node 22+).
+      - run: npm run test:app
       # No NODE_AUTH_TOKEN: publish authenticates via OIDC trusted publisher, so
       # there is no long-lived NPM_TOKEN secret to steal. Delete that secret in
       # the GitHub repo settings if it still exists.
