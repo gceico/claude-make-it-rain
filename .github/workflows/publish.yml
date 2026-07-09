@@ -29,18 +29,20 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted Publishing (OIDC) requires a recent npm. It landed in npm
-      # 11.5.1, and the npm bundled with Node may be older, so upgrade to latest.
-      - name: Upgrade npm (Trusted Publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1; Node 24 already bundles a
+      # newer npm (11.16.0), so we use it as-is. Do NOT `npm install -g npm@latest`
+      # here: the in-place self-upgrade corrupts npm's own dependency tree and
+      # drops `sigstore`, which breaks `npm publish --provenance`.
+      - name: Show npm version
+        run: npm --version
 
       # Guard against publishing a version that doesn't match the release tag.
       # The release tag (github.ref_name) may be prefixed with "v" (e.g.
