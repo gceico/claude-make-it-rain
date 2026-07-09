@@ -12,7 +12,7 @@ The dollar figure is a rough estimate from per-token pricing.
 
 ## Requirements
 
-- Node.js 18+ (you have this if you run Claude Code)
+- Node.js 22+ (you have this if you run Claude Code)
 - macOS, Windows, or Linux
 - Claude Code writing session logs to `~/.claude/projects` (the default)
 
@@ -179,9 +179,8 @@ node server/index.js          # listens on http://localhost:8787
 
 State lives in a small SQLite database (`server/data/leaderboard.db`, git-ignored),
 backed by the built-in `node:sqlite` module — still zero npm dependencies. The
-server therefore needs **Node >= 22** (where `node:sqlite` landed), even though
-the desktop app itself runs on Node 18+. Set `LEADERBOARD_DB` to override the
-file path.
+server uses `node:sqlite` (added in Node 22.5), and the desktop app shares the
+same **Node >= 22** baseline. Set `LEADERBOARD_DB` to override the file path.
 
 The reference server deploys to [Railway](https://railway.com) with `railway up ./server`,
 built from `server/Dockerfile` (`node:24-alpine`, no npm install, sleeps when idle;
@@ -221,7 +220,7 @@ MIR_TEST_SHOT=/tmp/overlay.png npm start  # save a PNG of the overlay 4s after l
   incremental/partial-line reads, crossing math.
 - `test/leaderboard-client.test.js` — tag generation/sanitization, config
   first-run/stability/recovery, telemetry toggle, and fail-silent reporting.
-- `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 18/20/22)
+- `.github/workflows/` — CI (tests on Linux/macOS/Windows × Node 22/24)
   and the npm publish pipeline.
 - `docs/DECISIONS.md` — architecture & decision log for the leaderboard,
   deployment, publishing, and security/anti-cheat work.

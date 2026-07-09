@@ -17,7 +17,7 @@ which spawns Electron detached).
 | Run (foreground, logs) | `npm start` (alias `npm run dev`) |
 | Run detached (like installed CLI) | `node bin/make-it-rain.js` |
 | Test everything | `npm test` (runs `test:app` then `test:server`) |
-| Test app only | `npm run test:app` (pure Node, Node 18+) |
+| Test app only | `npm run test:app` (pure Node, Node 22+) |
 | Test server only | `npm run test:server` (needs `node:sqlite`, Node 22+) |
 | Lint | `npm run lint` (`eslint .`) |
 | Format | `npm run format` / check with `npm run format:check` |
@@ -68,8 +68,8 @@ real devDependencies and installed; `npm run lint` works.
 
 ## Gotchas
 
-- `node:sqlite` landed in Node 22, so the server and `test:server` need Node ≥ 22,
-  even though the desktop app supports Node 18+.
+- `node:sqlite` landed in Node 22, so the server and `test:server` need Node ≥ 22;
+  the desktop app shares the same Node ≥ 22 baseline.
 - CI sets `ELECTRON_SKIP_BINARY_DOWNLOAD=1` for `npm ci` (tests never open a
   window, so the ~100 MB Electron binary is skipped).
 - Railway deploys the reference server from `server/` (`railway up ./server`),

@@ -5,7 +5,7 @@ the process is light.
 
 ## Getting started
 
-The published app supports Node 18+, but development targets the current LTS
+The app and server both require Node 22+; development targets the current LTS
 (pinned in `.nvmrc`, matching the server's deploy image):
 
 ```bash
