@@ -170,9 +170,14 @@ const {
     assert.strictEqual(await c.checkNow(), null, 'no version field -> null');
   }
 
-  // No fetch available at all: null, never throws.
+  // No fetch available at all: null, never throws. The constructor falls back
+  // to global fetch when none is injected, so to exercise the guard for an
+  // environment without fetch we null it on the instance (rather than passing
+  // fetchImpl: null, which the fallback would replace with global fetch and
+  // send a real network request).
   {
-    const c = new UpdateChecker({ currentVersion: CURRENT, fetchImpl: null });
+    const c = new UpdateChecker({ currentVersion: CURRENT });
+    c.fetchImpl = null;
     assert.strictEqual(await c.checkNow(), null, 'no fetchImpl -> null');
   }
 
