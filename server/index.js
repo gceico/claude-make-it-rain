@@ -8,7 +8,10 @@
  * Deploys to Railway with:  railway up ./server
  *
  * Endpoints:
- *   POST /api/report        body { tag: string, total: number } -> { ok, total }
+ *   POST /api/register      body { tag: string } -> { ok, tag, secret } (claims a
+ *                           tag once; returns a secret shown a single time)
+ *   POST /api/report        body { tag: string, total: number, secret?: string }
+ *                           -> { ok, total } (secret authenticates a claimed tag)
  *   GET  /api/leaderboard   -> { date, entries: [{ tag, total }] } (today only)
  *   GET  /api/stars         -> { stars: number|null } (GitHub stars, cached)
  *   GET  /                  -> static landing page (server/public/index.html)
@@ -36,6 +39,13 @@ const TAG_MAX_LENGTH = 32;
 // low hundreds of dollars; a $10,000/day default ceiling is generous while still
 // keeping the board honest. Tunable via MAX_REPORT_TOTAL for edge cases.
 const MAX_TOTAL = Number(process.env.MAX_REPORT_TOTAL) || 10000;
+
+// When true, reports for an UNREGISTERED tag are rejected (401) instead of being
+// accepted on trust. Default is SOFT (false): existing installs that predate the
+// credential feature keep reporting until they auto-register, so the board never
+// goes dark during the migration. Flip REQUIRE_SIGNED=1 once clients have rolled
+// forward to enforce that every report carries a valid secret.
+const REQUIRE_SIGNED = /^(1|true|yes)$/i.test(String(process.env.REQUIRE_SIGNED || ''));
 
 // ── Per-IP rate limiting for POST /api/report ───────────────────────────────
 // Legit clients report at most hourly, so a generous ceiling (60 req/min/IP by
@@ -199,6 +209,34 @@ function readBody(req) {
   });
 }
 
+// Claim a tag and return its one-time secret. Reuses handleReport's body/JSON
+// handling so oversized bodies still get a 413 and malformed JSON a 400.
+async function handleRegister(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (err) {
+    if (err && err.code === 'BODY_TOO_LARGE') {
+      return sendJSON(res, 413, { ok: false, error: 'body_too_large' });
+    }
+    return sendJSON(res, 400, { ok: false, error: 'invalid_json' });
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return sendJSON(res, 400, { ok: false, error: 'invalid_json' });
+  }
+
+  const tag = sanitizeTag(payload && payload.tag);
+  if (!tag) return sendJSON(res, 400, { ok: false, error: 'invalid_tag' });
+
+  const secret = db.claimTag(tag);
+  if (secret === null) return sendJSON(res, 409, { ok: false, error: 'tag_taken' });
+  return sendJSON(res, 200, { ok: true, tag, secret });
+}
+
 async function handleReport(req, res) {
   let raw;
   try {
@@ -224,6 +262,17 @@ async function handleReport(req, res) {
     return sendJSON(res, 400, { ok: false, error: 'invalid_total' });
   }
   total = Math.round(total * 100) / 100;
+
+  // Anti-spoofing gate. A claimed tag must present its secret; an unknown tag is
+  // trusted only while REQUIRE_SIGNED is off (soft migration — see the env const).
+  const secret = payload && payload.secret;
+  const status = db.verifyCredential(tag, secret);
+  if (status === 'invalid') {
+    return sendJSON(res, 401, { ok: false, error: 'unauthorized' });
+  }
+  if (status === 'unregistered' && REQUIRE_SIGNED) {
+    return sendJSON(res, 401, { ok: false, error: 'registration_required' });
+  }
 
   const stored = db.report(tag, total);
   return sendJSON(res, 200, { ok: true, total: stored });
@@ -256,6 +305,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'OPTIONS') { return sendJSON(res, 204, {}); }
 
+  if (req.method === 'POST' && pathname === '/api/register') {
+    const limit = checkRateLimit(clientIp(req));
+    if (!limit.allowed) {
+      return sendJSON(res, 429, { ok: false, error: 'rate_limited' }, { 'retry-after': String(limit.retryAfterSec) });
+    }
+    return handleRegister(req, res);
+  }
   if (req.method === 'POST' && pathname === '/api/report') {
     const limit = checkRateLimit(clientIp(req));
     if (!limit.allowed) {
