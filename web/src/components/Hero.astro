@@ -1,0 +1,32 @@
+---
+// Hero: wordmark, tagline, the "leaderboard of <date>" + "resets in <countdown>"
+// pills, and today's combined tally (hidden until the board loads with entries).
+// The date, countdown and tally values are populated client-side.
+---
+
+<header class="hero">
+  <h1 class="wordmark"><span class="rain-emoji">💸</span> Make It Rain</h1>
+  <p class="tagline">
+    The daily leaderboard of who made it rain hardest on Claude&nbsp;Code.
+  </p>
+  <div class="pills">
+    <div class="datepill">
+      <span class="dot"></span> Leaderboard of <span class="date" id="date"
+        >…</span
+      >
+    </div>
+    <div class="datepill reset">
+      <span class="dot"></span> Resets in <span class="date" id="countdown"
+        >…</span
+      >
+    </div>
+  </div>
+
+  <div class="tally" id="tally">
+    <div class="amt" id="tallyAmt">$0.00</div>
+    <p class="cap">
+      made it rain today across <b id="tallyCount">0</b>
+      <span id="tallyNoun">spenders</span>
+    </p>
+  </div>
+</header>

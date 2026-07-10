@@ -1,0 +1,20 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Hero from '../components/Hero.astro';
+import Leaderboard from '../components/Leaderboard.astro';
+---
+
+<Layout>
+  <main class="wrap">
+    <Hero />
+    <Leaderboard />
+  </main>
+</Layout>
+
+<script>
+  // Client entry: seeds the money rain, wires the countdown, and fetches the
+  // live star count + leaderboard (same-origin, fail-silent). Astro bundles this
+  // to a hashed module under /_astro/ and loads it with `type="module"` (deferred).
+  import { init } from '../lib/leaderboard';
+  init();
+</script>

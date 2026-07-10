@@ -3,6 +3,10 @@
 # public "Deployments" sidebar) appear on the repo. Output is discarded on
 # purpose: Actions logs on a public repo are public, and the Railway CLI
 # prints project/environment IDs. Check the Railway dashboard for build logs.
+#
+# The image is a multi-stage Docker build (server/Dockerfile) with the REPO
+# ROOT as the build context: it bakes the Astro site (web/ -> web/dist) into
+# the server image, so changes under web/ must also trigger a redeploy.
 name: Deploy server
 
 on:
@@ -10,7 +14,9 @@ on:
     branches: [main]
     paths:
       - 'server/**'
+      - 'web/**'
       - 'railway.json'
+      - '.dockerignore'
       - '.github/workflows/deploy-server.yml'
 
 concurrency:
@@ -21,7 +27,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

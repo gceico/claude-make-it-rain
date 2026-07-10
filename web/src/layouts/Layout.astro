@@ -1,0 +1,51 @@
+---
+// Base document shell: head (meta, OG/Twitter, favicon), the global stylesheet,
+// and the page body (ambient rain + top bar + <slot/> + footer). Content pages
+// only supply what goes inside <main>.
+import '../styles/global.css';
+import Rain from '../components/Rain.astro';
+import TopBar from '../components/TopBar.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Make It Rain — Leaderboard of the Day',
+  description = "The daily leaderboard of who made it rain hardest on Claude Code. Anonymous tags, today's estimated spend, resets daily.",
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <!-- Open Graph / Twitter — social share cards (an addition over the
+         original page, which had none). No remote image is referenced so the
+         self-only CSP is unaffected. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:site_name" content="Make It Rain" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <!-- Dollar-green "$" on the cash-on-midnight square, matching the app
+         identity; served same-origin. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+  </head>
+  <body>
+    <Rain />
+    <TopBar />
+    <slot />
+    <Footer />
+  </body>
+</html>

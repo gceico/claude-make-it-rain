@@ -1,0 +1,18 @@
+# Docker build context is the REPO ROOT (server/Dockerfile only COPYs web/ and
+# server/). Keep the uploaded context small and force fresh installs/builds.
+.git/
+node_modules/
+**/node_modules/
+web/dist/
+**/*.log
+.DS_Store
+**/.DS_Store
+
+# Desktop-app sources not needed by the server image.
+bin/
+lib/
+img/
+docs/
+main.js
+overlay.html
+preload.js

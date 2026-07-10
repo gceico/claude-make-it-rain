@@ -15,6 +15,12 @@ npm install -g @gceico/claude-make-it-rain
 claude-make-it-rain
 ```
 
+Or run it once without installing:
+
+```bash
+npx @gceico/claude-make-it-rain
+```
+
 The app detaches from the terminal and lives in your tray/menu bar. Quit it
 from the tray menu.
 
@@ -49,18 +55,21 @@ menu, or reroll your tag with **New random tag**.
 
 Settings live in `config.json` under Electron's `userData` directory (e.g.
 `~/Library/Application Support/make-it-rain/` on macOS). You can also self-host
-the backend — a zero-dependency Node HTTP server under `server/` — and point
-`apiBaseUrl` at it:
+the backend — a zero-dependency [Bun](https://bun.sh) server under `server/`
+(it uses only `bun:sqlite` and `Bun.serve`) — and point `apiBaseUrl` at it:
 
 ```bash
-node server/index.js          # http://localhost:8787
+bun server/index.ts           # http://localhost:8787
 ```
+
+The leaderboard page itself is an [Astro](https://astro.build) static site in
+`web/` (`cd web && bun run build`), which the server serves from `web/dist`.
 
 ## How it works
 
 The app polls `~/.claude/projects/*/*.jsonl` every 3 seconds, reading only
 newly appended bytes. Each assistant message with a `usage` block from today
-is priced with the per-model table in `lib/pricing.js` (cache reads at 10% of
+is priced with the per-model table in `src/lib/pricing.ts` (cache reads at 10% of
 the input rate, cache writes at 1.25×/2×), deduplicated by
 `requestId:messageId`, and the total resets at local midnight.
 
@@ -69,20 +78,27 @@ Animations render on the primary display.
 
 ## Development
 
+Built with [Bun](https://bun.sh) (≥ 1.3) as the package manager, test runner,
+and bundler; the sources are TypeScript. (The published CLI still runs under
+your Node — Electron embeds its own.)
+
 ```bash
 git clone https://github.com/gceico/claude-make-it-rain
 cd claude-make-it-rain
-npm install
-npm start        # foreground, logs in the terminal
-npm test         # pure-Node unit tests, no Electron window
+bun install
+bun start        # build + launch Electron (logs in the terminal)
+bun run start:all  # full local stack: leaderboard server + landing page on
+                   # http://localhost:8787 + the app reporting to it (isolated
+                   # config in .dev/ — your real settings are untouched)
+bun run test     # unit tests, no Electron window
 ```
 
 Debug hooks for the animations:
 
 ```bash
-MIR_TEST_RAIN=1 npm start                 # $100 rain 1.5s after launch
-MIR_TEST_STACK=5 npm start                # burst 5 money stacks
-MIR_TEST_SHOT=/tmp/overlay.png npm start  # screenshot the overlay
+MIR_TEST_RAIN=1 bun start                 # $100 rain 1.5s after launch
+MIR_TEST_STACK=5 bun start                # burst 5 money stacks
+MIR_TEST_SHOT=/tmp/overlay.png bun start  # screenshot the overlay
 ```
 
 Architecture notes live in [CLAUDE.md](CLAUDE.md) and
@@ -97,8 +113,9 @@ gh release create v1.0.1 --generate-notes
 ```
 
 Publishing the GitHub Release triggers `.github/workflows/publish.yml`, which
-tests and publishes to npm with provenance. One-time setup: add an npm
-automation token as the `NPM_TOKEN` repo secret.
+builds, tests, and publishes to npm with provenance via OIDC Trusted
+Publishing — there is no npm token to configure. One-time setup: add a Trusted
+Publisher entry for this repo + workflow on npmjs.com.
 
 ## Who's behind this
 

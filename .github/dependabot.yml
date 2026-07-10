@@ -1,8 +1,8 @@
 version: 2
 updates:
   # Keep the SHA-pinned GitHub Actions current. Dependabot bumps the pin and the
-  # human-readable version comment together, so the publish workflow's supply-chain
-  # hardening stays maintainable.
+  # human-readable version comment together, so the workflows' supply-chain
+  # hardening stays maintainable (this also SHA-pins oven-sh/setup-bun@v2).
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -10,7 +10,9 @@ updates:
     commit-message:
       prefix: ci
 
-  # npm dependencies for the Electron app.
+  # Dependencies for the Electron app. Bun is the package manager now (bun.lock),
+  # but Dependabot's npm ecosystem reads package.json and understands Bun
+  # lockfiles, so version bumps keep working.
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -21,9 +23,11 @@ updates:
       dev-dependencies:
         dependency-type: development
 
-  # npm dependencies for the leaderboard server.
+  # Dependencies for the Astro landing site (web/). The leaderboard server
+  # itself has ZERO npm dependencies (bun:sqlite + Bun builtins only), so it has
+  # no manifest to watch — web/ is the only place the deploy image installs from.
   - package-ecosystem: npm
-    directory: /server
+    directory: /web
     schedule:
       interval: weekly
     commit-message:
