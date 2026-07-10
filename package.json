@@ -1,6 +1,6 @@
 {
   "name": "@gceico/claude-make-it-rain",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Satirical menu bar app that estimates today's Claude Code spend and makes it rain",
   "license": "MIT",
   "author": "Gabriel Ceicoschi <ceicoschi.gabriel@gmail.com>",
