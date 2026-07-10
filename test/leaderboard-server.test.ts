@@ -229,6 +229,30 @@ test('per-IP rate limiter (429 + Retry-After past limit, other IP OK)', async ()
   expect(other.status).toBe(200);
 });
 
+test('rate limiter keys on the proxy-appended (rightmost) XFF entry', async () => {
+  // A client can prepend arbitrary entries to x-forwarded-for; only the
+  // RIGHTMOST one is appended by the trusted proxy in front of the server. If
+  // the limiter keyed on the leftmost entry, each request below would land in
+  // its own bucket and the flood would never trip 429.
+  for (let i = 0; i < RATE_LIMIT_MAX; i++) {
+    const ok = await request(
+      'POST',
+      '/api/report',
+      { tag: 'Spoof', total: 1 },
+      { 'x-forwarded-for': `10.0.${i}.1, 192.0.2.50` }
+    );
+    expect(ok.status).toBe(200);
+  }
+  const blocked = await request(
+    'POST',
+    '/api/report',
+    { tag: 'Spoof', total: 1 },
+    { 'x-forwarded-for': '10.99.99.99, 192.0.2.50' }
+  );
+  expect(blocked.status).toBe(429);
+  expect(JSON.parse(blocked.body).error).toBe('rate_limited');
+});
+
 test('security headers (nosniff + JSON type + CSP on HTML)', async () => {
   const board = await request('GET', '/api/leaderboard');
   expect(

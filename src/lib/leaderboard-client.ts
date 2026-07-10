@@ -29,7 +29,7 @@ const LEGACY_PLACEHOLDER_URLS = [
   'https://make-it-rain.example.com',
   'https://claude-make-it-rain-production.up.railway.app',
 ];
-const DEFAULT_REPORT_INTERVAL_MS = 60 * 60 * 1000; // hourly
+const DEFAULT_REPORT_INTERVAL_MS = 10 * 60 * 1000; // every 10 minutes
 const REQUEST_TIMEOUT_MS = 8000;
 const CONFIG_FILENAME = 'config.json';
 const TAG_MAX_LENGTH = 32;
