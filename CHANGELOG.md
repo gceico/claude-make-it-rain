@@ -27,6 +27,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     root that bakes `web/dist` into the server image.
   - CI runs on `oven-sh/setup-bun` across Linux, macOS, and Windows (build,
     tests, `tsc --noEmit`, lint, format check, and the Astro build).
+- **Adopted TypeScript 7 (the native compiler) and replaced ESLint with
+  oxlint.** The root `typescript` devDependency is now `^7.0.2`; `bunx tsc
+--noEmit` runs on the native compiler. ESLint had to go because
+  `typescript-eslint` caps its peer range below TypeScript 6 and hard-crashes
+  under TS 7. The `eslint`, `@eslint/js`, `globals`, and `typescript-eslint`
+  devDependencies and `eslint.config.js` are removed; `bun run lint` now runs
+  `oxlint` (config in `.oxlintrc.json`). Prettier is unchanged. Note: oxlint is
+  a non-type-aware linter, so the type-aware lint rules that `typescript-eslint`
+  provided are no longer enforced — `bunx tsc --noEmit` (strict mode) remains
+  the type-correctness gate. `web/` stays on TypeScript `^5.9.3` for now because
+  `@astrojs/check` (the Astro type checker) crashes under TS 7.
 
 ## [1.0.4] - 2026-07-09
 

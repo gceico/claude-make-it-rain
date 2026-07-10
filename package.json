@@ -51,7 +51,7 @@
     "start": "bun run build && electron .",
     "start:all": "bun run scripts/dev-all.ts",
     "dev": "bun run build && electron .",
-    "lint": "eslint .",
+    "lint": "oxlint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:app": "bun test test/usage-monitor.test.ts test/delight.test.ts test/leaderboard-client.test.ts test/history.test.ts test/update-checker.test.ts",
@@ -63,13 +63,10 @@
     "electron": "^43.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/bun": "^1.3.0",
     "@types/node": "^22.10.0",
-    "eslint": "^10.6.0",
-    "globals": "^17.7.0",
+    "oxlint": "^1.73.0",
     "prettier": "^3.9.5",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.20.0"
+    "typescript": "^7.0.2"
   }
 }
