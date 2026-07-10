@@ -22,5 +22,10 @@ WORKDIR /app
 COPY server/package.json ./
 COPY server/index.ts server/db.ts ./
 COPY --from=web-build /build/web/dist /app/public
+# Pre-create the volume mount point owned by the runtime user: a fresh volume
+# mounted at /data inherits this ownership, so the non-root server can create
+# LEADERBOARD_DB=/data/leaderboard.db on first boot (an existing volume with
+# data keeps whatever ownership it already has).
+RUN mkdir -p /data && chown bun:bun /data
 USER bun
 CMD ["bun", "index.ts"]
