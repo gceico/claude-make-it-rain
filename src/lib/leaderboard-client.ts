@@ -400,9 +400,28 @@ export class LeaderboardClient {
         body: JSON.stringify({ tag: this.config.gamerTag, total }),
         signal: controller ? controller.signal : undefined,
       });
-      return !!(res && res.ok);
-    } catch {
-      return false; // unreachable / DNS / abort / anything — stay silent
+      const ok = !!(res && res.ok);
+      // Hardening (issue #26): a server-side outage used to be completely
+      // invisible because a non-2xx just returned false. Log the status so a
+      // broken /api/report is diagnosable, without changing the fail-silent,
+      // no-retry, never-crash contract (the return value is unchanged and the
+      // next tick is still the only retry).
+      if (!ok) {
+        console.warn(
+          `[make-it-rain] leaderboard report rejected (HTTP ${
+            res && typeof res.status === 'number' ? res.status : '?'
+          })`
+        );
+      }
+      return ok;
+    } catch (err) {
+      // unreachable / DNS / abort / anything — never throw, never retry.
+      console.warn(
+        `[make-it-rain] leaderboard report failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return false;
     } finally {
       if (timeout) clearTimeout(timeout);
       this._reporting = false;
