@@ -1,0 +1,42 @@
+---
+// Install: two-step "get started" block — install the CLI, then run it. Each
+// command is a click-to-copy button (fail-silent if the clipboard API is
+// unavailable). Kept intentionally compact so it sits under the hero without
+// pushing the leaderboard down. Copy wiring lives in the inline script below.
+---
+
+<section class="install" aria-label="Get started">
+  <button class="cmd" type="button" data-copy="npm install -g claude-make-it-rain">
+    <span class="prompt" aria-hidden="true">$</span>
+    <code>npm install -g claude-make-it-rain</code>
+    <span class="copy" aria-hidden="true">Copy</span>
+  </button>
+  <button class="cmd" type="button" data-copy="claude-make-it-rain">
+    <span class="prompt" aria-hidden="true">$</span>
+    <code>claude-make-it-rain</code>
+    <span class="copy" aria-hidden="true">Copy</span>
+  </button>
+</section>
+
+<script>
+  // Click-to-copy for the two install commands. Fail-silent: browsers without
+  // navigator.clipboard (or when permission is denied) just do nothing.
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.install .cmd')) {
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.copy;
+      if (!text || !navigator.clipboard) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add('copied');
+        const label = btn.querySelector('.copy');
+        if (label) label.textContent = 'Copied';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          if (label) label.textContent = 'Copy';
+        }, 1400);
+      } catch {
+        /* clipboard blocked — ignore */
+      }
+    });
+  }
+</script>
