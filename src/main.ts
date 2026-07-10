@@ -30,7 +30,11 @@ import * as denominations from './lib/denominations';
 import { LeaderboardClient } from './lib/leaderboard-client';
 import { History, RANGES, billCount } from './lib/history';
 import type { Range, RangeResult, DayEntry } from './lib/history';
-import { stackCountForCrossing } from './lib/milestones';
+import {
+  stackCountForCrossing,
+  dollarsCrossed,
+  crossedHundred,
+} from './lib/milestones';
 import { UpdateChecker, shouldNotify } from './lib/update-checker';
 
 // We only ever play synthesized output audio (Web Audio oscillators in the
@@ -455,7 +459,6 @@ function rainAllDisplays(): void {
 // the anchor converted to that display's local coordinate space. Tray-anchored
 // animations (dollar-fly, milestone stacks) play only on that display.
 function trayDisplayTarget(): { entry: OverlayEntry; anchor: Rectangle } {
-  ensureOverlays();
   const a = trayAnchor();
   const center = {
     x: a.x + Math.floor(a.width / 2),
@@ -525,7 +528,7 @@ function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   initialScanHandled = true;
 
   // Dollar-fly: number of whole-dollar boundaries crossed since the last update.
-  const dollarsGained = Math.floor(newTotal) - Math.floor(previousTotal);
+  const dollarsGained = dollarsCrossed(previousTotal, newTotal);
   if (dollarsGained > 0) {
     flyBillsFromTray(dollarsGained);
   }
@@ -542,9 +545,7 @@ function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   }
 
   // $100-rain: trigger if we crossed at least one multiple of 100.
-  const previousHundreds = Math.floor(previousTotal / 100);
-  const newHundreds = Math.floor(newTotal / 100);
-  if (newHundreds > previousHundreds && newTotal >= 100) {
+  if (crossedHundred(previousTotal, newTotal)) {
     rainAllDisplays();
   }
 }

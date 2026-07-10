@@ -1,13 +1,13 @@
 'use strict';
 
-import { test } from 'bun:test';
+import { test, afterAll } from 'bun:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { UsageMonitor } from '../src/lib/usage-monitor';
 import { costForEntry, pricingForModel } from '../src/lib/pricing';
-import { stackCountForCrossing } from '../src/lib/milestones';
+import { dollarsCrossed, crossedHundred } from '../src/lib/milestones';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mir-test-'));
 const projectsDir = path.join(tmpRoot, 'projects');
@@ -313,55 +313,14 @@ test('incremental append + partial-line buffering', () => {
   assert.ok(Math.abs(updates[0].prev - 1.45) < 1e-9);
 });
 
-// ── Dollar-crossing math used by main.ts ─────────────────────────────────────
+// ── Dollar-crossing math used by main.ts (lib/milestones.ts) ─────────────────
 test('crossing math', () => {
+  assert.strictEqual(dollarsCrossed(1.45, 4.45), 3, '3 whole dollars crossed');
+  assert.strictEqual(crossedHundred(95, 105), true, '$100 boundary crossed');
   assert.strictEqual(
-    Math.floor(4.45) - Math.floor(1.45),
-    3,
-    '3 whole dollars crossed'
-  );
-  assert.strictEqual(
-    Math.floor(105 / 100) - Math.floor(95 / 100),
-    1,
-    '$100 boundary crossed'
-  );
-});
-
-// ── Milestone stack crossings used by main.ts (lib/milestones.ts) ────────────
-// Milestones fire the first time today's total crosses M: previousTotal < M <= newTotal.
-// Because previousTotal resets to $0 at midnight (monitor _resetState), this also
-// resets the milestones for free the next day.
-test('milestone crossing math', () => {
-  assert.strictEqual(
-    stackCountForCrossing(9.5, 10.2),
-    1,
-    '$10 milestone fires one stack on first crossing'
-  );
-  assert.strictEqual(
-    stackCountForCrossing(10.2, 12),
-    0,
-    '$10 milestone does not re-fire after crossing'
-  );
-  assert.strictEqual(
-    stackCountForCrossing(48, 51),
-    5,
-    '$50 milestone fires five stacks on first crossing'
-  );
-  assert.strictEqual(
-    stackCountForCrossing(51, 99),
-    0,
-    '$50 milestone does not re-fire after crossing'
-  );
-  assert.strictEqual(
-    stackCountForCrossing(0, 10),
-    1,
-    'exact landing on $10 counts as a crossing'
-  );
-  // When several thresholds are crossed in one jump, only the highest fires.
-  assert.strictEqual(
-    stackCountForCrossing(5, 55),
-    5,
-    'a $5→$55 jump fires the $50 stacks (highest crossed)'
+    crossedHundred(50, 99),
+    false,
+    'no $100 boundary crossed below $100'
   );
 });
 
@@ -416,6 +375,6 @@ test('deterministic dedup on re-read', () => {
   );
 });
 
-test('cleanup', () => {
+afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

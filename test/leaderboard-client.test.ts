@@ -1,6 +1,6 @@
 'use strict';
 
-import { test } from 'bun:test';
+import { test, afterAll } from 'bun:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -439,6 +439,6 @@ test('apiBaseUrlOverride: in-memory only, validated, wins over config', async ()
   assert.strictEqual(c2.apiBaseUrl, c2.config.apiBaseUrl);
 });
 
-test('cleanup', () => {
+afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

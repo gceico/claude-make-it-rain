@@ -90,8 +90,7 @@ export class LeaderboardDB {
     day: string = LeaderboardDB.today(),
     limit = 100
   ): LeaderboardEntry[] {
-    const rows = this.boardStmt.all(day, limit) as LeaderboardEntry[];
-    return rows.map((r) => ({ tag: r.tag, total: r.total }));
+    return this.boardStmt.all(day, limit) as LeaderboardEntry[];
   }
 
   /** Drop days other than today + yesterday so the DB can't grow forever. */

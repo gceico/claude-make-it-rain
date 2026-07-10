@@ -22,7 +22,7 @@ const tmpDir = mkdtempSync(join(tmpdir(), 'mir-server-test-'));
 const dbPath = join(tmpDir, 'lb.db');
 const staticDir = join(tmpDir, 'public');
 
-// Rate-limit ceiling for the in-process server. Set comfortably above the ~18
+// Rate-limit ceiling for the in-process server. Set comfortably above the ~17
 // POSTs the rest of this suite fires from 127.0.0.1 so those never trip, while
 // the dedicated rate-limit test floods a DISTINCT client IP (via x-forwarded-
 // for) so it exercises the limiter in isolation without affecting other cases.
@@ -174,25 +174,17 @@ test('daily total cap: reject 10001, accept 9999', async () => {
   expect(JSON.parse(under.body).total).toBe(9999);
 });
 
-test('oversized body guard holds (not accepted, never stored)', async () => {
+test('oversized body returns 413 body_too_large and is never stored', async () => {
   const huge = await rawPost(
     '/api/report',
     JSON.stringify({ tag: 'A'.repeat(8000), total: 1 })
   );
-  expect(huge.status).not.toBe(200);
+  expect(huge.status).toBe(413);
+  expect(JSON.parse(huge.body).error).toBe('body_too_large');
   const board = JSON.parse((await request('GET', '/api/leaderboard')).body);
   expect(
     board.entries.some((e: { tag: string }) => e.tag.startsWith('AAAA'))
   ).toBe(false);
-});
-
-test('oversized body returns 413 body_too_large (not 400 invalid_json)', async () => {
-  const big = await rawPost(
-    '/api/report',
-    JSON.stringify({ tag: 'B'.repeat(5000), total: 1 })
-  );
-  expect(big.status).toBe(413);
-  expect(JSON.parse(big.body).error).toBe('body_too_large');
 });
 
 test('per-IP rate limiter (429 + Retry-After past limit, other IP OK)', async () => {
