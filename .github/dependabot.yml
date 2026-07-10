@@ -22,6 +22,19 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # typescript-eslint (even the latest 8.x) caps its peer range at
+      # `typescript <6.1.0` and hard-crashes when driven by TypeScript 6/7
+      # (tsgo): eslint dies with "Cannot read properties of undefined
+      # (reading 'Cjs')". The repo cannot adopt a TS major until
+      # typescript-eslint supports it, so hold typescript at 5.x here.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      # @types/node is deliberately pinned to the 22.x line to match
+      # `engines.node >=22` (the published CLI's minimum supported Node).
+      # Major bumps would model APIs newer than the supported runtime.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   # Dependencies for the Astro landing site (web/). The leaderboard server
   # itself has ZERO npm dependencies (bun:sqlite + Bun builtins only), so it has
@@ -32,3 +45,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: deps
+    ignore:
+      # `astro check` runs @astrojs/check / @astrojs/language-server, which
+      # crashes under TypeScript 6/7 ("Cannot read properties of undefined
+      # (reading 'fileExists')" in getTsconfig). Hold web's typescript at 5.x
+      # until the Astro language tooling supports the new tsgo compiler.
+      # (Astro majors themselves are fine — astro 7 is adopted.)
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
