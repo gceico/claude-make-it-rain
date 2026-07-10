@@ -233,7 +233,7 @@ function rebuildTrayMenu(): void {
 function openLeaderboardPage(): void {
   try {
     if (!leaderboard) return;
-    const base = leaderboard.config.apiBaseUrl.replace(/\/+$/, '');
+    const base = leaderboard.apiBaseUrl.replace(/\/+$/, '');
     shell.openExternal(base + '/');
   } catch {
     /* ignore — opening the page is best-effort */
@@ -622,9 +622,13 @@ if (!app.requestSingleInstanceLock()) {
 
     // Cloud daily leaderboard: anonymized tag + today's total, reported hourly.
     // Telemetry is ON by default but disclosed and toggleable from the tray menu.
+    // MIR_API_BASE_URL=http://localhost:8787 points reports and the "View
+    // leaderboard" page at a local server for this process only — it is never
+    // written to the persisted config (see `bun run start:all`).
     leaderboard = new LeaderboardClient({
       configDir: app.getPath('userData'),
       getTotal: () => latestSnapshot.totalCostUSD,
+      apiBaseUrlOverride: process.env.MIR_API_BASE_URL,
       onConfigChange: () => {
         if (tray) rebuildTrayMenu();
       },

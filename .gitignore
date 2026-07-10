@@ -31,3 +31,6 @@ Thumbs.db
 .claude/*
 !.claude/settings.json
 .claude/settings.local.json
+
+# Local full-stack dev scratch (bun run start:all): dev DB + isolated userData
+.dev/

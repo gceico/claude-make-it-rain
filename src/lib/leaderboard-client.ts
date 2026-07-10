@@ -273,6 +273,13 @@ export interface LeaderboardClientOptions {
   getTotal?: () => number;
   fetchImpl?: FetchLike | null;
   onConfigChange?: (config: LeaderboardConfig) => void;
+  /**
+   * Dev/test hook: route reports and the leaderboard page at this base URL
+   * for THIS process only, without ever persisting it to the on-disk config
+   * (`bun run start:all` uses it to point the app at a local server). Ignored
+   * unless it is an absolute http(s) URL.
+   */
+  apiBaseUrlOverride?: string;
 }
 
 export class LeaderboardClient {
@@ -283,12 +290,14 @@ export class LeaderboardClient {
   timer: NodeJS.Timeout | null;
   _reporting: boolean;
   config: LeaderboardConfig;
+  apiBaseUrlOverride: string | null;
 
   constructor({
     configDir,
     getTotal,
     fetchImpl,
     onConfigChange,
+    apiBaseUrlOverride,
   }: LeaderboardClientOptions = {}) {
     this.configDir = configDir || defaultConfigDir();
     this.getTotal = typeof getTotal === 'function' ? getTotal : () => 0;
@@ -301,7 +310,17 @@ export class LeaderboardClient {
       typeof onConfigChange === 'function' ? onConfigChange : null;
     this.timer = null;
     this._reporting = false;
+    this.apiBaseUrlOverride =
+      typeof apiBaseUrlOverride === 'string' &&
+      isSafeHttpUrl(apiBaseUrlOverride.trim())
+        ? apiBaseUrlOverride.trim()
+        : null;
     this.config = ensureConfig(this.configDir);
+  }
+
+  /** Effective base URL: the (validated) process-local override, else config. */
+  get apiBaseUrl(): string {
+    return this.apiBaseUrlOverride ?? this.config.apiBaseUrl;
   }
 
   get gamerTag(): string {
@@ -374,7 +393,7 @@ export class LeaderboardClient {
       if (typeof total !== 'number' || !isFinite(total) || total < 0) total = 0;
       total = Math.round(total * 100) / 100;
 
-      const url = this.config.apiBaseUrl.replace(/\/+$/, '') + '/api/report';
+      const url = this.apiBaseUrl.replace(/\/+$/, '') + '/api/report';
       const res = await this.fetchImpl(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

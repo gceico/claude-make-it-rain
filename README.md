@@ -87,6 +87,9 @@ git clone https://github.com/gceico/claude-make-it-rain
 cd claude-make-it-rain
 bun install
 bun start        # build + launch Electron (logs in the terminal)
+bun run start:all  # full local stack: leaderboard server + landing page on
+                   # http://localhost:8787 + the app reporting to it (isolated
+                   # config in .dev/ — your real settings are untouched)
 bun run test     # unit tests, no Electron window
 ```
 

@@ -407,6 +407,38 @@ test('client reporting (payload minimalism, disable, fail-silent)', async () => 
   assert.strictEqual(await c4.reportNow(), false, 'bad status -> false');
 });
 
+test('apiBaseUrlOverride: in-memory only, validated, wins over config', async () => {
+  // Override rewires reports without touching the persisted config.
+  const dir = path.join(tmpRoot, 'override1');
+  let requestedUrl = '';
+  const c = new LeaderboardClient({
+    configDir: dir,
+    getTotal: () => 5,
+    apiBaseUrlOverride: 'http://localhost:8787',
+    fetchImpl: async (url: string) => {
+      requestedUrl = url;
+      return { ok: true, status: 200 };
+    },
+  });
+  assert.strictEqual(await c.reportNow(), true);
+  assert.strictEqual(requestedUrl, 'http://localhost:8787/api/report');
+  assert.strictEqual(c.apiBaseUrl, 'http://localhost:8787');
+
+  // Persisted config keeps the real URL: a dev override never leaks to disk.
+  c.setTelemetryEnabled(true); // force a save
+  const onDisk = JSON.parse(
+    fs.readFileSync(path.join(dir, 'config.json'), 'utf8')
+  );
+  assert.notStrictEqual(onDisk.apiBaseUrl, 'http://localhost:8787');
+
+  // Unsafe override (non-http(s)) is ignored entirely.
+  const c2 = new LeaderboardClient({
+    configDir: path.join(tmpRoot, 'override2'),
+    apiBaseUrlOverride: 'javascript:alert(1)',
+  });
+  assert.strictEqual(c2.apiBaseUrl, c2.config.apiBaseUrl);
+});
+
 test('cleanup', () => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
