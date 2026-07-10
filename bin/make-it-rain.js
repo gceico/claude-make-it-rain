@@ -39,7 +39,7 @@ var electronBinary;
 try {
   electronBinary = require("electron");
 } catch {
-  console.error("Could not load Electron. Try: npm install -g make-it-rain");
+  console.error("Could not load Electron. Try: npm install -g @gceico/claude-make-it-rain");
   process.exit(1);
 }
 var scriptPath = fs.realpathSync(process.argv[1]);
@@ -54,5 +54,8 @@ child.on("error", (err) => {
   console.error("Failed to start make-it-rain:", err.message);
   process.exit(1);
 });
-if (!foreground)
+if (!foreground) {
   child.unref();
+} else {
+  child.on("exit", (code, signal) => process.exit(signal ? 1 : code ?? 0));
+}

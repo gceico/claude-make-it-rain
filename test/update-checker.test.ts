@@ -9,6 +9,7 @@ import {
   isNewerVersion,
   shouldNotify,
   REGISTRY_URL,
+  DEFAULT_CHECK_INTERVAL_MS,
 } from '../src/lib/update-checker';
 
 // ── parseVersion ─────────────────────────────────────────────────────────────
@@ -287,12 +288,10 @@ test('checkNow: no version field -> null', async () => {
 });
 
 test('checkNow: no fetchImpl -> null', async () => {
-  // The constructor falls back to global fetch when none is injected, so to
-  // exercise the guard for an environment without fetch we null it on the
-  // instance (rather than passing fetchImpl: null, which the fallback would
-  // replace with global fetch and send a real network request).
-  const c = new UpdateChecker({ currentVersion: CURRENT });
-  c.fetchImpl = null;
+  // An explicit fetchImpl: null means "no network" and is honored as-is (never
+  // replaced with global fetch), so checkNow short-circuits without a request.
+  const c = new UpdateChecker({ currentVersion: CURRENT, fetchImpl: null });
+  assert.strictEqual(c.fetchImpl, null, 'explicit null fetchImpl is preserved');
   assert.strictEqual(await c.checkNow(), null, 'no fetchImpl -> null');
 });
 
@@ -312,6 +311,34 @@ test('checkNow: throwing onUpdateAvailable is swallowed', async () => {
     await c.checkNow(),
     { version: '2.0.0' },
     'callback error is swallowed'
+  );
+});
+
+// ── checkIntervalMs bounds (no per-ms request storm) ─────────────────────────
+test('checkIntervalMs out-of-range -> default', () => {
+  // A valid in-range value is respected.
+  assert.strictEqual(
+    new UpdateChecker({ currentVersion: CURRENT, checkIntervalMs: 60000 })
+      .checkIntervalMs,
+    60000,
+    'in-range interval respected'
+  );
+  // Too small -> default.
+  assert.strictEqual(
+    new UpdateChecker({ currentVersion: CURRENT, checkIntervalMs: 5 })
+      .checkIntervalMs,
+    DEFAULT_CHECK_INTERVAL_MS,
+    'too-small interval -> default'
+  );
+  // Over 2^31-1 ms -> default: Node would clamp such a setInterval delay to
+  // 1ms, turning the check into a per-ms registry request storm.
+  assert.strictEqual(
+    new UpdateChecker({
+      currentVersion: CURRENT,
+      checkIntervalMs: 9999999999000,
+    }).checkIntervalMs,
+    DEFAULT_CHECK_INTERVAL_MS,
+    'over-32-bit interval -> default (no per-ms storm)'
   );
 });
 

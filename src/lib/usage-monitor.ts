@@ -87,7 +87,8 @@ export class UsageMonitor {
   tick(isInitial: boolean): void {
     // Detect local-midnight rollover.
     const todayStart = UsageMonitor.startOfToday();
-    if (todayStart.getTime() !== this.currentDayStart.getTime()) {
+    const rolled = todayStart.getTime() !== this.currentDayStart.getTime();
+    if (rolled) {
       this._resetState();
     }
 
@@ -99,7 +100,13 @@ export class UsageMonitor {
     const snap: Snapshot = { ...this.snapshot };
     if (isInitial && this.onInitialScanComplete)
       this.onInitialScanComplete(snap);
-    if ((snap.totalCostUSD !== previousTotal || isInitial) && this.onUpdate) {
+    // Emit on rollover even when the total is unchanged (e.g. no new spend yet
+    // after midnight): consumers must be told the daily total reset to $0 so
+    // they stop displaying / reporting yesterday's figure.
+    if (
+      (snap.totalCostUSD !== previousTotal || isInitial || rolled) &&
+      this.onUpdate
+    ) {
       this.onUpdate(previousTotal, snap);
     }
   }

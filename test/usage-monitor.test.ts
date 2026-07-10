@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { UsageMonitor } from '../src/lib/usage-monitor';
+import type { Snapshot } from '../src/lib/usage-monitor';
 import { costForEntry, pricingForModel } from '../src/lib/pricing';
 import { dollarsCrossed, crossedHundred } from '../src/lib/milestones';
 
@@ -93,6 +94,16 @@ test('pricing model coverage + cost math', () => {
   assert.deepStrictEqual(pricingForModel('claude-haiku-4-5'), {
     inputPerMillion: 1,
     outputPerMillion: 5,
+  });
+  // Haiku 3.5 ($0.8/$4) and Claude 3 Haiku ($0.25/$1.25) are distinct tiers;
+  // the real ids are 'claude-3-5-haiku-*' and 'claude-3-haiku-*'.
+  assert.deepStrictEqual(pricingForModel('claude-3-5-haiku-20241022'), {
+    inputPerMillion: 0.8,
+    outputPerMillion: 4,
+  });
+  assert.deepStrictEqual(pricingForModel('claude-3-haiku-20240307'), {
+    inputPerMillion: 0.25,
+    outputPerMillion: 1.25,
   });
   // Old Opus 4.0/4.1 kept their historical $15/$75 rate.
   assert.deepStrictEqual(pricingForModel('claude-opus-4-1'), {
@@ -372,6 +383,124 @@ test('deterministic dedup on re-read', () => {
   assert.ok(
     Math.abs(monitor2.snapshot.totalCostUSD - 15) < 1e-9,
     `id-less entry double-counted on re-read: got ${monitor2.snapshot.totalCostUSD}, expected $15`
+  );
+});
+
+// ── Midnight rollover: state reset re-derives today-only totals ─────────────
+// Simulates the monitor running across local midnight by backdating
+// currentDayStart. The rollover must reset all state and re-scan; the full
+// re-read must not double-count today's entries (seenKeys/fileOffsets reset).
+test('midnight rollover resets state without double-counting today', () => {
+  const projectsDir3 = path.join(tmpRoot, 'projects3');
+  const projectDir3 = path.join(projectsDir3, 'proj');
+  fs.mkdirSync(projectDir3, { recursive: true });
+  const file3 = path.join(projectDir3, 'session.jsonl');
+  fs.writeFileSync(
+    file3,
+    [
+      // yesterday — ignored by the day filter
+      entry({
+        ts: yesterdayISO,
+        model: 'claude-sonnet-5',
+        reqId: 'y1',
+        msgId: 'ym1',
+        input: 500_000,
+        output: 500_000,
+      }),
+      // today — 100k in / 10k out on sonnet = 0.3 + 0.15 = $0.45
+      entry({
+        ts: todayISO,
+        model: 'claude-sonnet-5',
+        reqId: 't1',
+        msgId: 'tm1',
+        input: 100_000,
+        output: 10_000,
+      }),
+    ].join('\n') + '\n'
+  );
+
+  const m = new UsageMonitor({ projectsDir: projectsDir3 });
+  m.tick(true);
+  assert.ok(
+    Math.abs(m.snapshot.totalCostUSD - 0.45) < 1e-9,
+    `expected $0.45 today-only, got ${m.snapshot.totalCostUSD}`
+  );
+
+  const updates: Array<{ prev: number; snap: Snapshot }> = [];
+  m.onUpdate = (prev, snap) => {
+    updates.push({ prev, snap });
+  };
+  // Pretend the monitor has been running since yesterday.
+  m.currentDayStart = UsageMonitor.startOfToday(
+    new Date(Date.now() - 24 * 3600 * 1000)
+  );
+  m.tick(false);
+
+  assert.strictEqual(
+    m.currentDayStart.getTime(),
+    UsageMonitor.startOfToday().getTime(),
+    'rollover must advance currentDayStart to today'
+  );
+  assert.ok(
+    Math.abs(m.snapshot.totalCostUSD - 0.45) < 1e-9,
+    `re-scan after reset must not double-count: got ${m.snapshot.totalCostUSD}`
+  );
+  assert.ok(updates.length >= 1, 'onUpdate must fire on the rollover tick');
+  assert.strictEqual(updates[0].prev, 0, 'previousTotal after reset is 0');
+});
+
+// ── Midnight rollover with no new spend still emits a zeroed update ──────────
+// Regression for the bug where onUpdate never fired on the first post-midnight
+// tick without new entries, leaving consumers reporting yesterday's total.
+test('midnight rollover with no new spend emits a zeroed onUpdate', () => {
+  const projectsDir4 = path.join(tmpRoot, 'projects4');
+  const projectDir4 = path.join(projectsDir4, 'proj');
+  fs.mkdirSync(projectDir4, { recursive: true });
+  const file4 = path.join(projectDir4, 'session.jsonl');
+  // Only a yesterday entry: after rollover there is no today spend.
+  fs.writeFileSync(
+    file4,
+    entry({
+      ts: yesterdayISO,
+      model: 'claude-sonnet-5',
+      reqId: 'y1',
+      msgId: 'ym1',
+      input: 500_000,
+      output: 500_000,
+    }) + '\n'
+  );
+
+  const m = new UsageMonitor({ projectsDir: projectsDir4 });
+  m.tick(true);
+  assert.strictEqual(
+    m.snapshot.totalCostUSD,
+    0,
+    'no today spend before rollover'
+  );
+
+  const updates: Array<{ prev: number; snap: Snapshot }> = [];
+  m.onUpdate = (prev, snap) => {
+    updates.push({ prev, snap });
+  };
+  m.currentDayStart = UsageMonitor.startOfToday(
+    new Date(Date.now() - 24 * 3600 * 1000)
+  );
+  m.tick(false);
+
+  assert.strictEqual(
+    updates.length,
+    1,
+    'rollover must emit exactly one onUpdate even with no new spend'
+  );
+  assert.strictEqual(updates[0].prev, 0, 'previousTotal after reset is 0');
+  assert.strictEqual(
+    updates[0].snap.totalCostUSD,
+    0,
+    'snapshot must be zeroed after rollover'
+  );
+  assert.strictEqual(
+    m.currentDayStart.getTime(),
+    UsageMonitor.startOfToday().getTime()
   );
 });
 

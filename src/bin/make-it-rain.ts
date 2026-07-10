@@ -17,7 +17,9 @@ try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   electronBinary = require('electron') as unknown as string;
 } catch {
-  console.error('Could not load Electron. Try: npm install -g make-it-rain');
+  console.error(
+    'Could not load Electron. Try: npm install -g @gceico/claude-make-it-rain'
+  );
   process.exit(1);
 }
 
@@ -41,4 +43,11 @@ child.on('error', (err) => {
   process.exit(1);
 });
 
-if (!foreground) child.unref();
+if (!foreground) {
+  child.unref();
+} else {
+  // Propagate Electron's exit status so scripts/CI can detect a failed launch.
+  // 'exit' (not 'close') is correct here: stdio is inherited, so there are no
+  // parent-side pipes left to flush.
+  child.on('exit', (code, signal) => process.exit(signal ? 1 : (code ?? 0)));
+}

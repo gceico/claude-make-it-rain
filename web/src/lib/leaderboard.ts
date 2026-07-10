@@ -211,6 +211,9 @@ function pad(n: number): string {
   return (n < 10 ? '0' : '') + n;
 }
 
+// Seeded eagerly so the first tick doesn't spuriously re-fetch the board.
+let lastUtcDay = new Date().toISOString().slice(0, 10);
+
 function tickCountdown(): void {
   const now = new Date();
   const next = Date.UTC(
@@ -221,11 +224,14 @@ function tickCountdown(): void {
     0,
     0
   );
-  let ms = next - now.getTime();
-  if (ms <= 0) {
+  const ms = next - now.getTime();
+  // next is always strictly after now, so ms stays positive; detect the UTC-day
+  // rollover by comparing the calendar day rather than waiting for ms to reach 0.
+  const day = now.toISOString().slice(0, 10);
+  if (day !== lastUtcDay) {
+    lastUtcDay = day;
     loadBoard();
-    ms = 0;
-  } // rolled past midnight — refresh the board
+  }
   const s = Math.floor(ms / 1000);
   const el = byId('countdown');
   if (el)
