@@ -113,7 +113,10 @@ oven/bun:1-alpine`, sets `NODE_ENV=production`, copies only
 `package.json index.ts db.ts` and the built `web/dist` (→ `/app/public`), and
 starts with `bun index.ts` — no `npm install` for the server. The server process
 runs as the non-root `bun` user. A small `docker-entrypoint.sh` runs first as
-root to `chown` the mounted `/data` volume, then drops to `bun` via `su-exec`
+root to `chown` the mounted `/data` volume — non-recursively and only the
+directory plus the exact SQLite paths (with `chown -h`, so a symlink planted in
+the volume by a hypothetically compromised server can never redirect a
+root-privileged chown at another file) — then drops to `bun` via `su-exec`
 before exec'ing the server. `railway.json` sets `numReplicas: 1` and
 `sleepApplication: true` (scale-to-zero when idle).
 
@@ -341,8 +344,10 @@ status (the label was previously wrong).
 `server/index.js`): default `RATE_LIMIT_MAX` = 60 requests per
 `RATE_LIMIT_WINDOW_MS` = 60,000 ms (60/min/IP), both env-overridable. Exceeding
 it returns `429 rate_limited` with a `Retry-After` header. The client IP is the
-**leftmost** entry of `x-forwarded-for` (Railway sits behind a proxy, so
-`req.socket.remoteAddress` is the proxy), falling back to the socket address. A
+**rightmost** entry of `x-forwarded-for` — the one appended by the trusted
+proxy directly in front of us (Railway), which a client cannot spoof; the
+leftmost entries are client-supplied and would let an attacker bypass the
+limiter with a random fake IP per request. Falls back to the socket address. A
 low-frequency background sweeper drops expired buckets so the map stays
 memory-bounded; the sweeper is `.unref()`'d so it never keeps the process alive
 (tests/CLI exit cleanly).
@@ -350,9 +355,10 @@ memory-bounded; the sweeper is `.unref()`'d so it never keeps the process alive
 **Rationale.** Legit clients report at most hourly, so 60/min/IP never
 inconveniences a real user while stopping a trivial single-source flood.
 
-**Tradeoffs / accepted risks.** `x-forwarded-for` is client-influenceable, so
-this is explicitly **best-effort** — it stops a naive single-origin flood, **not**
-a distributed/spoofed one. Consciously accepted.
+**Tradeoffs / accepted risks.** Trusting the rightmost `x-forwarded-for` entry
+assumes exactly one proxy hop in front of the server (true on Railway). This
+stops single-origin floods including spoofed-XFF ones, but **not** a genuinely
+distributed flood. Consciously accepted.
 
 **Status.** Shipped.
 

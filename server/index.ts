@@ -18,7 +18,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 import { LeaderboardDB } from './db.ts';
 
 // Minimal structural view of the Bun `Server` passed to a fetch handler: we only
@@ -102,13 +102,18 @@ function jsonResponse(
   return new Response(JSON.stringify(obj), { status, headers });
 }
 
-// Best-effort client IP: prefer the FIRST (leftmost) x-forwarded-for entry set
-// by the proxy in front of us; fall back to the raw socket when the header is
-// absent (e.g. local/direct connections). XFF is spoofable, so treat as a hint.
+// Best-effort client IP: prefer the LAST (rightmost) x-forwarded-for entry —
+// that is the one appended by the trusted proxy directly in front of us
+// (Railway), so a client cannot spoof it by sending its own XFF header. The
+// leftmost entries are client-supplied and would let an attacker bypass the
+// rate limiter (and bloat the bucket map) with a random fake IP per request.
+// Assumes exactly one trusted proxy hop; falls back to the raw socket when the
+// header is absent (e.g. local/direct connections).
 function clientIp(req: Request, server: RequestIpServer): string {
   const xff = req.headers.get('x-forwarded-for');
   if (xff && xff.length > 0) {
-    return xff.split(',')[0]!.trim();
+    const parts = xff.split(',');
+    return parts[parts.length - 1]!.trim();
   }
   return server.requestIP(req)?.address || '';
 }
@@ -131,7 +136,12 @@ async function serveStatic(
 ): Promise<Response> {
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const filePath = normalize(join(staticDir, rel));
-  if (!filePath.startsWith(staticDir)) {
+  // Containment check: compare against the directory WITH a trailing separator
+  // so a sibling sharing the prefix (e.g. /app/public-evil next to /app/public)
+  // can never pass. The URL parser already normalizes ../ segments out of
+  // pathname; this is defense-in-depth.
+  const base = staticDir.endsWith(sep) ? staticDir : staticDir + sep;
+  if (!filePath.startsWith(base)) {
     return new Response('Forbidden', { status: 403 });
   }
   const file = Bun.file(filePath);
@@ -169,9 +179,9 @@ export function createApp(config: AppConfig = {}): App {
   const maxTotal =
     config.maxTotal ?? (Number(process.env.MAX_REPORT_TOTAL) || 10000);
 
-  // Per-IP rate limiting for POST /api/report. Legit clients report at most
-  // hourly, so a generous ceiling (60 req/min/IP by default) never inconveniences
-  // real users while stopping a trivial single-source flood.
+  // Per-IP rate limiting for POST /api/report. Legit clients report every 10
+  // minutes (~6/hr), so a generous ceiling (60 req/min/IP by default) never
+  // inconveniences real users while stopping a trivial single-source flood.
   const rateLimitMax =
     config.rateLimitMax ?? (Number(process.env.RATE_LIMIT_MAX) || 60);
   const rateLimitWindowMs =

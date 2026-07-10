@@ -18,9 +18,19 @@ DATA_DIR="$(dirname "$DB_PATH")"
 # Best-effort: never let an ownership hiccup crash boot. If chown fails (e.g.
 # already correct, or an unusual read-only mount), the server surfaces the real
 # error on first write.
+#
+# Deliberately NOT `chown -R`: this runs as root over a directory the
+# unprivileged server writes to, so we only touch the directory itself plus the
+# exact SQLite paths we own, and use -h so a symlink planted in the volume can
+# never redirect the chown at a root-owned file elsewhere in the container.
 if [ -d "$DATA_DIR" ]; then
-  chown -R bun:bun "$DATA_DIR" 2>/dev/null || true
+  chown bun:bun "$DATA_DIR" 2>/dev/null || true
 fi
+for f in "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    chown -h bun:bun "$f" 2>/dev/null || true
+  fi
+done
 
 # Drop to the unprivileged user and exec the server (CMD is passed as "$@").
 exec su-exec bun "$@"

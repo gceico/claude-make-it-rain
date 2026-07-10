@@ -620,7 +620,7 @@ if (!app.requestSingleInstanceLock()) {
       handleUpdate(previousTotal, snapshot);
     monitor.start();
 
-    // Cloud daily leaderboard: anonymized tag + today's total, reported hourly.
+    // Cloud daily leaderboard: anonymized tag + today's total, reported every 10 min.
     // Telemetry is ON by default but disclosed and toggleable from the tray menu.
     // MIR_API_BASE_URL=http://localhost:8787 points reports and the "View
     // leaderboard" page at a local server for this process only — it is never
