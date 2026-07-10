@@ -67,9 +67,13 @@ export function compareVersions(a: unknown, b: unknown): number {
   return 0;
 }
 
-/** True when `latest` is a well-formed version strictly newer than `current`. */
+/**
+ * True when `latest` is a well-formed version strictly newer than `current`.
+ * compareVersions already guarantees an unparseable `latest` sorts as
+ * not-greater, so no separate parse guard is needed here.
+ */
 export function isNewerVersion(latest: unknown, current: unknown): boolean {
-  return parseVersion(latest) !== null && compareVersions(latest, current) > 0;
+  return compareVersions(latest, current) > 0;
 }
 
 /**

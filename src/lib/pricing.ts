@@ -56,9 +56,10 @@ export function pricingForModel(model: string | null | undefined): Pricing {
   }
   if (
     m.includes('opus-4-1') ||
+    // 'opus-4-2' catches the date-suffixed legacy ids (claude-opus-4-20250514);
+    // a future "Opus 4.2" would also land here — re-tier it if that ships.
     m.includes('opus-4-2') ||
-    m.includes('claude-opus-4-0') ||
-    m.includes('claude-opus-4-2025')
+    m.includes('claude-opus-4-0')
   ) {
     return { inputPerMillion: 15, outputPerMillion: 75 };
   }

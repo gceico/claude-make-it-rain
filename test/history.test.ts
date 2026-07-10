@@ -1,6 +1,6 @@
 'use strict';
 
-import { test } from 'bun:test';
+import { test, afterAll } from 'bun:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -303,6 +303,6 @@ test('immutable past-days ledger (only today re-read on refresh)', async () => {
   }
 });
 
-test('cleanup', () => {
+afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

@@ -31,3 +31,26 @@ export function stackCountForCrossing(
   }
   return count;
 }
+
+/** Number of whole-dollar boundaries crossed going from `previousTotal` to
+ *  `newTotal` — one dollar-fly bill per boundary. */
+export function dollarsCrossed(
+  previousTotal: number,
+  newTotal: number
+): number {
+  return Math.floor(newTotal) - Math.floor(previousTotal);
+}
+
+/** Whether the total crossed at least one multiple of $100 going from
+ *  `previousTotal` to `newTotal` — the trigger for the full-screen money rain.
+ *  The `newTotal >= 100` guard keeps a drop below zero (or replayed negatives)
+ *  from spuriously firing the rain. */
+export function crossedHundred(
+  previousTotal: number,
+  newTotal: number
+): boolean {
+  return (
+    Math.floor(newTotal / 100) > Math.floor(previousTotal / 100) &&
+    newTotal >= 100
+  );
+}

@@ -195,16 +195,21 @@ export function normalizeConfig(raw: unknown): LeaderboardConfig {
   return { gamerTag: tag, telemetryEnabled, apiBaseUrl, reportIntervalMs };
 }
 
+/** Read + parse the raw config file. Never throws; returns null when the file
+ * is missing or corrupt. */
+function readRawConfig(configDir: string): unknown {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.join(configDir, CONFIG_FILENAME), 'utf8')
+    );
+  } catch {
+    return null; // missing or corrupt
+  }
+}
+
 /** Read + normalize config from disk. Never throws; returns defaults on error. */
 export function loadConfig(configDir: string): LeaderboardConfig {
-  const file = path.join(configDir, CONFIG_FILENAME);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    raw = null; // missing or corrupt — fall back to defaults
-  }
-  return normalizeConfig(raw);
+  return normalizeConfig(readRawConfig(configDir));
 }
 
 /**
@@ -221,12 +226,7 @@ export function saveConfig(
   try {
     fs.mkdirSync(configDir, { recursive: true });
     const file = path.join(configDir, CONFIG_FILENAME);
-    let raw: unknown = null;
-    try {
-      raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch {
-      raw = null; // missing or corrupt — nothing to preserve
-    }
+    const raw = readRawConfig(configDir);
     const base =
       raw && typeof raw === 'object' && !Array.isArray(raw)
         ? (raw as Record<string, unknown>)
@@ -248,13 +248,7 @@ export function saveConfig(
  * and returns the normalized config.
  */
 export function ensureConfig(configDir: string): LeaderboardConfig {
-  const file = path.join(configDir, CONFIG_FILENAME);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    raw = null;
-  }
+  const raw = readRawConfig(configDir);
   const config = normalizeConfig(raw);
   // Persist when the file is new — or when it exists but has no valid tag
   // (e.g. the shared config.json was first created by another feature, such
