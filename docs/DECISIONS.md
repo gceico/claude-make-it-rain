@@ -108,16 +108,29 @@ Yesterday's data is discarded — this is intentional, not an archive.
 **Context.** A zero-dependency server needs no build step and no `npm install`,
 so the image can be tiny.
 
-**Decision.** `server/Dockerfile` is `FROM node:24-alpine`, sets
-`NODE_ENV=production`, copies only `package.json index.js db.js` and `public/`,
-runs as the non-root `USER node`, and starts with `node index.js` — no
-`npm install`, no build stage. `server/railway.json` sets `numReplicas: 1` and
+**Decision.** `server/Dockerfile` is a multi-stage build `FROM
+oven/bun:1-alpine`, sets `NODE_ENV=production`, copies only
+`package.json index.ts db.ts` and the built `web/dist` (→ `/app/public`), and
+starts with `bun index.ts` — no `npm install` for the server. The server process
+runs as the non-root `bun` user. A small `docker-entrypoint.sh` runs first as
+root to `chown` the mounted `/data` volume, then drops to `bun` via `su-exec`
+before exec'ing the server. `railway.json` sets `numReplicas: 1` and
 `sleepApplication: true` (scale-to-zero when idle).
 
 **Rationale.** No dependencies means no install layer; Alpine + a single process
 keeps the image small and fast to boot (which matters for scale-to-zero cold
-starts). Running as non-root is basic container hygiene. Sleeping when idle keeps
-a hobby service near free.
+starts). Running the server as non-root is basic container hygiene. Sleeping when
+idle keeps a hobby service near free.
+
+The root-then-drop entrypoint fixes a real outage (issue #26): a build-time
+`chown bun:bun /data` is **shadowed** when Railway mounts the persistent volume
+at `/data` root-owned, so the non-root server could not write the SQLite file —
+every `POST /api/report` crashed with `SQLITE_READONLY` ("attempt to write a
+readonly database") and returned 500. Taking ownership at boot (as root) and
+then dropping privileges keeps the server unprivileged while guaranteeing the
+volume is writable regardless of how the host mounts it. `su-exec` is a ~10 KB
+Alpine package (no npm dependency added, so the zero-npm-dependency invariant
+holds).
 
 **Tradeoffs / accepted risks.** Scale-to-zero adds cold-start latency to the
 first request after idle; acceptable for a leaderboard that clients poll at most

@@ -19,13 +19,17 @@ FROM oven/bun:1-alpine AS runtime
 ENV NODE_ENV=production
 ENV STATIC_DIR=/app/public
 WORKDIR /app
+# su-exec lets the root entrypoint drop to the `bun` user after fixing volume
+# ownership (Alpine main repo, ~10 KB, no npm dependency added).
+RUN apk add --no-cache su-exec
 COPY server/package.json ./
 COPY server/index.ts server/db.ts ./
+COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=web-build /build/web/dist /app/public
-# Pre-create the volume mount point owned by the runtime user: a fresh volume
-# mounted at /data inherits this ownership, so the non-root server can create
-# LEADERBOARD_DB=/data/leaderboard.db on first boot (an existing volume with
-# data keeps whatever ownership it already has).
-RUN mkdir -p /data && chown bun:bun /data
-USER bun
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /data
+# NOTE: the container starts as root ONLY to run the entrypoint, which chowns
+# the mounted /data volume (Railway mounts it root-owned, shadowing any
+# build-time chown) and then execs the server as the non-root `bun` user via
+# su-exec. The server process itself never runs as root — see docs/DECISIONS.md.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["bun", "index.ts"]
