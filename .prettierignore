@@ -1,9 +1,14 @@
 # Generated / vendored
 node_modules/
 package-lock.json
+bun.lock
+dist/
+bin/make-it-rain.js
 server/data/
+web/.astro/
+web/dist/
 
-# Hand-tuned HTML with embedded assets (large base64 font / favicon) — leaving
-# these to Prettier would reflow the embedded data and hurt readability.
+# Hand-tuned HTML/CSS with embedded assets (large base64 font / favicon) —
+# leaving these to Prettier would reflow the embedded data and hurt readability.
 overlay.html
-server/public/index.html
+web/src/styles/global.css

@@ -6,11 +6,11 @@
 
 ## How I tested
 
-<!-- e.g. `npm test`, ran the app on macOS, hit the leaderboard endpoint. -->
+<!-- e.g. `bun run test`, ran the app on macOS, hit the leaderboard endpoint. -->
 
 ## Checklist
 
-- [ ] `npm test` passes
-- [ ] `npm run lint` passes
+- [ ] `bun run test` passes
+- [ ] `bun run lint` passes
 - [ ] Docs/README updated if behavior changed
 - [ ] No secrets, tokens, or personal data committed

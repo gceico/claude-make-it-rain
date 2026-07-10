@@ -1,0 +1,20 @@
+{
+  "name": "make-it-rain-web",
+  "type": "module",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Astro landing page + live daily leaderboard for Make It Rain, served static by the leaderboard backend.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^5.14.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "typescript": "^5.9.3"
+  }
+}

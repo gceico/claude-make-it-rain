@@ -37,7 +37,7 @@ public repository.
 can read exactly what leaves their machine (`lib/leaderboard-client.js`) and
 exactly what the server accepts and stores (`server/index.js`, `server/db.js`).
 The endpoint is assumed to be publicly discoverable anyway (it is printed in the
-client source and served on a public page), which is *why* the server has
+client source and served on a public page), which is _why_ the server has
 rate limiting and input hardening rather than relying on obscurity.
 
 **Tradeoffs / accepted risks.** Secrets must never live in the repo — deploy
@@ -62,8 +62,9 @@ hostname with minimal setup, and supports scale-to-zero (`sleepApplication`, see
 §1.4) to keep an idle hobby service cheap.
 
 **Tradeoffs / accepted risks.**
+
 - The Railway service is (per project operational setup, configured in Railway
-  and *not* in the repo) GitHub-connected to `main` with auto-deploy on push.
+  and _not_ in the repo) GitHub-connected to `main` with auto-deploy on push.
   Implication: merging to `main` ships to production immediately — there is no
   manual gate, so `main` must stay deployable.
 - Region, plan, and project/service names are Railway-side settings and are
@@ -92,7 +93,7 @@ date) and **auto-prunes** to today + yesterday on every write
 
 **Rationale.** Built-in SQLite keeps the server dependency-free (nothing to
 `npm install`, nothing to audit, faster/cheaper container) while still giving
-durable, queryable state. Daily reset + prune keeps it a fun *of-the-day* board
+durable, queryable state. Daily reset + prune keeps it a fun _of-the-day_ board
 and bounds storage.
 
 **Tradeoffs / accepted risks.** `node:sqlite` is only available on **Node ≥ 22**
@@ -124,39 +125,37 @@ hourly and that fails silently on the client if slow/unreachable.
 
 **Status.** Shipped.
 
-### 1.5 Two `railway.json` files, and the deploy gotcha
+### 1.5 One `railway.json`, Dockerfile built from the repo root
 
-**Context.** There are **two** Railway config files in the repo and they describe
-**different** builds:
+**Context.** Historically there were **two** Railway config files (a `RAILPACK`
+one at the repo root and a `DOCKERFILE` one in `server/`), and the deploy
+command had to target `server/` (`railway up ./server`) for the intended
+Dockerfile build to win. The Bun/TypeScript/Astro port made the Docker build
+context the **repo root** (the image bakes the Astro site from `web/` into the
+server image), which made the two-config split actively dangerous: deploying
+from `server/` could no longer work at all, since `web/` would be outside the
+build context.
 
-| File | `build.builder` | Notable deploy settings |
-|------|-----------------|-------------------------|
-| `railway.json` (repo root) | `RAILPACK` | `startCommand: "node server/index.js"`, healthcheck `/health` |
-| `server/railway.json` | `DOCKERFILE` (`Dockerfile`) | `numReplicas: 1`, `sleepApplication: true`, healthcheck `/health` |
+**Decision.** There is now a **single** `railway.json` at the repo root:
+`builder: DOCKERFILE` with `dockerfilePath: "server/Dockerfile"`, healthcheck
+`/health`, `numReplicas: 1`, and `sleepApplication: true`. `server/railway.json`
+was deleted. Deploys run from the **repo root** — the GitHub Actions workflow
+(`.github/workflows/deploy-server.yml`) does exactly `railway up --service
+claude-make-it-rain --ci` from the checkout root, and a manual deploy is the
+same command from the repo root. A root `.dockerignore` keeps the uploaded
+context small.
 
-**Decision.** Deploy by pointing Railway at the `server/` directory as the build
-root — the README and the `server/index.js` header both document the command as:
+**Rationale.** One config, one context, one command — the previous footgun
+(same code deploying two different ways depending on the directory you ran
+`railway up` from) is gone, and the scale-to-zero Dockerfile build is always
+the one that applies.
 
-```bash
-railway up ./server
-```
+**Tradeoffs / accepted risks.** Anyone following the old `railway up ./server`
+instruction will now fail fast (no `railway.json` and no reachable `web/` in
+that context) rather than silently deploying the wrong build — an acceptable
+trade for a single source of truth.
 
-so that `server/railway.json` (the Dockerfile build with scale-to-zero) is the
-config that applies.
-
-**Rationale / the gotcha.** If you deploy from the repo root (or otherwise let
-the CLI upload the whole repo as the build context), the **root** `railway.json`
-wins instead — and it is a *different* build (`RAILPACK`, not the Dockerfile) that
-lacks `sleepApplication`. So the same code can deploy two different ways depending
-on what you treat as the build root. Deploy from / against `server/` to get the
-intended Dockerfile + scale-to-zero build. (The root config exists as a working
-fallback for a whole-repo build.)
-
-**Tradeoffs / accepted risks.** Two config files is a footgun for anyone who runs
-`railway up` from the wrong directory; the mitigation is documenting the exact
-command and keeping both configs functional.
-
-**Status.** Shipped.
+**Status.** Shipped (reworked in the Bun port, 2026-07-10).
 
 ### 1.6 Reference host behind `aiburn.dev`
 
@@ -191,8 +190,10 @@ Trusted Publishing (OIDC)**. There is **no** npm token and no `.npmrc` credentia
 anywhere in the workflow. The job declares `permissions: id-token: write` (plus
 `contents: read` for checkout); GitHub mints a short-lived OIDC token that npm
 verifies against the Trusted Publisher configured for the package on npmjs.com.
-Because npm Trusted Publishing needs npm ≥ 11.5.1 (newer than what Node bundles),
-the workflow runs `npm install -g npm@latest` before publishing. The publish step
+npm Trusted Publishing needs npm ≥ 11.5.1; the workflow runs on Node 24, whose
+bundled npm is already new enough, so it is used as-is (an in-place
+`npm install -g npm@latest` self-upgrade is deliberately avoided — it corrupts
+npm's own dependency tree and breaks `--provenance`). The publish step
 is `npm publish --access public --provenance` (`--access public` is required for
 the scoped package `@gceico/claude-make-it-rain`; `--provenance` produces a signed
 provenance attestation linking the artifact to the commit + workflow run).
@@ -209,7 +210,7 @@ repo or workflow file breaks publishing until the Trusted Publisher is updated.
 
 ### 2.2 Trigger on version-tag push, with a version guard
 
-**Context.** Releases must publish the *right* version, and only real releases
+**Context.** Releases must publish the _right_ version, and only real releases
 should publish.
 
 **Decision.** The workflow triggers on `push:` of tags matching `v*`
@@ -217,9 +218,10 @@ should publish.
 `npm version patch && git push --follow-tags`; publishing a GitHub Release also
 works because creating a Release pushes the tag. A guard step compares
 `package.json` `version` against the tag (`GITHUB_REF_NAME` with a leading `v`
-stripped) and aborts the publish if they differ. The workflow runs on Node 24,
-installs with `npm ci` (`ELECTRON_SKIP_BINARY_DOWNLOAD=1` since the tests are pure
-Node), and runs `npm test` before publishing.
+stripped) and aborts the publish if they differ. The workflow sets up Node 24 (for
+`npm publish` itself) and Bun, installs with `bun install --frozen-lockfile`
+(`ELECTRON_SKIP_BINARY_DOWNLOAD=1` since the tests never open a window), runs
+`bun run build`, and runs `bun run test` before publishing.
 
 **Rationale.** Tag-push is an unambiguous release signal, and the version guard
 prevents shipping a package whose `package.json` version disagrees with the tag.
@@ -229,7 +231,7 @@ tagged commit, so the pipeline and the version guard must already be correct in
 the commit you tag.
 
 > **Discrepancy flagged:** the `README.md` "Releasing (maintainers)" section is
-> **stale** — it still describes the *old* token-based flow (create an npm
+> **stale** — it still describes the _old_ token-based flow (create an npm
 > automation token, add it as an `NPM_TOKEN` secret) and says publishing fires
 > "whenever a GitHub Release is published." The live workflow uses OIDC (no
 > token) and triggers on tag push. This doc reflects the workflow; the README
@@ -284,6 +286,7 @@ promise; there is no user-identifying data at rest.
 **Context.** `POST /api/report` accepts arbitrary JSON from anyone.
 
 **Decision (`handleReport` in `server/index.js`).**
+
 - **Tag:** `sanitizeTag` strips to `[A-Za-z0-9_-]` and truncates to
   `TAG_MAX_LENGTH` (32). Empty result → `400 invalid_tag`. (The client applies
   the same sanitization in `lib/leaderboard-client.js`.)
@@ -293,7 +296,7 @@ promise; there is no user-identifying data at rest.
   $10,000/day default ceiling.
 
 **Rationale.** Sanitizing the tag makes it safe to render and store. The cap
-bounds absurd/troll values *and* rejects near-`Number.MAX_VALUE` numbers that
+bounds absurd/troll values _and_ rejects near-`Number.MAX_VALUE` numbers that
 pass `isFinite()` but would overflow to `Infinity` when multiplied (e.g.
 `total * 100`).
 
@@ -448,6 +451,7 @@ first designing HMAC-signed credentials + server-side tag masking, then dropping
 that, then re-adopting the simplest workable version.
 
 **Decision (design).** Backend-issued per-tag credentials:
+
 - `POST /api/register` mints a random secret for an **unclaimed** tag. The secret
   is stored **hashed**, never in raw form.
 - `POST /api/report` must present a valid secret for a **registered** tag, or it
@@ -490,7 +494,7 @@ tightening.
 **Context.** §4.2 is not merged yet, so what actually protects the board right
 now?
 
-**Decision.** Today's integrity floor is the combination that *is* live: the
+**Decision.** Today's integrity floor is the combination that _is_ live: the
 `MAX_TOTAL` cap (§3.3) + input validation + the best-effort per-IP rate limiter
 (§3.5). Tag credentials (§4.2) layer on top once merged.
 
@@ -501,22 +505,98 @@ now?
 ## Operational knobs
 
 Environment variables actually read by the code on this branch (server unless
-noted). Constants that are *not* env-tunable are listed for completeness.
+noted). Constants that are _not_ env-tunable are listed for completeness.
 
-| Name | Default | Where | Purpose |
-|------|---------|-------|---------|
-| `PORT` | `8787` | `server/index.js` | HTTP listen port |
-| `LEADERBOARD_DB` | `server/data/leaderboard.db` | `server/index.js`, `server/db.js` | SQLite file path (reference deploy: `/data/leaderboard.db` on the volume) |
-| `MAX_REPORT_TOTAL` | `10000` | `server/index.js` | Upper bound on an accepted total (the `MAX_TOTAL` cap) |
-| `RATE_LIMIT_MAX` | `60` | `server/index.js` | Max `POST /api/report` requests per IP per window |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | `server/index.js` | Rate-limit window length (ms) |
-| `GITHUB_REPO` | `gceico/claude-make-it-rain` | `server/index.js` | Repo whose star count powers `GET /api/stars` |
-| `NODE_ENV` | `production` | `server/Dockerfile` | Standard Node environment flag |
-| `REQUIRE_SIGNED` | *(unset)* | — | **Planned** (§4.2): reject reports for unregistered tags. **Not present in code on this branch** — lives on `feat/tag-credentials`. |
-| `MAX_BODY_BYTES` (constant) | `4096` (4 KB) | `server/index.js` | Max request body size → `413`. **Not env-tunable** (a source constant). |
-| `TAG_MAX_LENGTH` (constant) | `32` | `server/index.js`, `lib/leaderboard-client.js` | Tag length cap. **Not env-tunable**. |
+| Name                        | Default                      | Where                                          | Purpose                                                                                                                             |
+| --------------------------- | ---------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                      | `8787`                       | `server/index.js`                              | HTTP listen port                                                                                                                    |
+| `LEADERBOARD_DB`            | `server/data/leaderboard.db` | `server/index.js`, `server/db.js`              | SQLite file path (reference deploy: `/data/leaderboard.db` on the volume)                                                           |
+| `MAX_REPORT_TOTAL`          | `10000`                      | `server/index.js`                              | Upper bound on an accepted total (the `MAX_TOTAL` cap)                                                                              |
+| `RATE_LIMIT_MAX`            | `60`                         | `server/index.js`                              | Max `POST /api/report` requests per IP per window                                                                                   |
+| `RATE_LIMIT_WINDOW_MS`      | `60000`                      | `server/index.js`                              | Rate-limit window length (ms)                                                                                                       |
+| `GITHUB_REPO`               | `gceico/claude-make-it-rain` | `server/index.js`                              | Repo whose star count powers `GET /api/stars`                                                                                       |
+| `NODE_ENV`                  | `production`                 | `server/Dockerfile`                            | Standard Node environment flag                                                                                                      |
+| `REQUIRE_SIGNED`            | _(unset)_                    | —                                              | **Planned** (§4.2): reject reports for unregistered tags. **Not present in code on this branch** — lives on `feat/tag-credentials`. |
+| `MAX_BODY_BYTES` (constant) | `4096` (4 KB)                | `server/index.js`                              | Max request body size → `413`. **Not env-tunable** (a source constant).                                                             |
+| `TAG_MAX_LENGTH` (constant) | `32`                         | `server/index.js`, `lib/leaderboard-client.js` | Tag length cap. **Not env-tunable**.                                                                                                |
 
 Client-side (`lib/leaderboard-client.js`) config lives in `config.json`, not env:
 `gamerTag`, `telemetryEnabled` (default `true`), `apiBaseUrl` (default
 `https://aiburn.dev`, scheme-allow-listed per §3.7), and `reportIntervalMs`
 (default hourly, floored at 60,000 ms).
+
+---
+
+## 5. Toolchain: the Bun + TypeScript + Astro port (2026-07-10)
+
+The sections above were written when the codebase was Node + CommonJS with a
+`node:sqlite` server and a hand-written HTML landing page under `server/public`.
+On 2026-07-10 the project moved to a Bun + TypeScript toolchain with an Astro
+site. Runtime behavior for end users is unchanged; the shift is dev-facing. File
+references in the sections above (e.g. `server/index.js`, `lib/…`) predate the
+rename to `server/index.ts` / `src/lib/…` and are kept as historical record.
+
+### 5.1 Bun as the single toolchain
+
+**Context.** The project juggled npm (package manager), `node:test` (tests), and
+had no bundler — sources were shipped as-is.
+
+**Decision.** Use **Bun** (pinned via `packageManager: bun@1.3.12`) as the
+package manager (`bun.lock`, `package-lock.json` deleted), test runner
+(`bun test` / `bun:test`), and bundler (`Bun.build`). `engines.node >= 22` stays
+because the _published_ CLI runs under the user's Node.
+
+**Rationale.** One fast tool for install, test, and build; TypeScript runs with
+no separate transpile config; the server can execute `.ts` directly.
+
+**Tradeoffs.** Contributors need Bun installed. CI uses `oven-sh/setup-bun`
+(pinned to `@v2` until Dependabot SHA-pins it, matching the other actions).
+
+### 5.2 Electron keeps its embedded Node → a compile step
+
+**Context.** Electron cannot run on Bun; it embeds its own Node.
+
+**Decision.** `scripts/build.ts` uses `Bun.build` to compile the TS sources to
+**standalone CommonJS** — `dist/main.js`, `dist/preload.js`, and
+`bin/make-it-rain.js` (node shebang injected, `chmod +x`) — with `electron`
+kept **external** (a runtime `require`, never inlined). `main` points at
+`dist/main.js`. `dist/` is gitignored and rebuilt by `bun run build`;
+`bin/make-it-rain.js` is a committed artifact so `npx` works. `npm publish`
+builds via the `prepublishOnly` hook, which is why the publish workflow sets up
+Bun alongside Node.
+
+### 5.3 `bun:sqlite` is drop-in for the existing DB
+
+**Context.** The server stored state with `node:sqlite`; the on-disk DB lives on
+the Railway `/data` volume.
+
+**Decision.** Switch to `bun:sqlite`. The SQLite **file format is unchanged**, so
+the existing `/data/leaderboard.db` keeps working with no migration. The
+zero-npm-dependency invariant (§1.4) is preserved — `bun:sqlite` and `Bun.serve`
+are builtins.
+
+### 5.4 Astro static site, fully inlined for CSP
+
+**Context.** The landing page shipped as a hand-written file under
+`server/public` and had to satisfy the strict CSP (§3.6): no external
+scripts/styles/fonts.
+
+**Decision.** Rebuild the page as an **Astro 5** static site in `web/` (only
+dependency: `astro`). `bun run build` emits a **single fully-inlined HTML file**
+
+- favicon to `web/dist` — no external requests, so the existing
+  `default-src 'none'` CSP still holds. `server/public` was deleted; the server
+  now resolves static assets via `STATIC_DIR` → `server/public` (if present) →
+  `web/dist`.
+
+### 5.5 Multi-stage Docker build from the repo root
+
+**Context.** The server image previously built `server/` alone; the site now
+lives in a separate `web/` package that must be built and baked in.
+
+**Decision.** `server/Dockerfile` is a **multi-stage** build (`oven/bun:1-alpine`)
+run with the **repo root** as context: stage 1 builds `web/` (Astro → `web/dist`),
+stage 2 runs the zero-dependency server with `STATIC_DIR=/app/public`. Both the
+root and `server/` `railway.json` use `builder: DOCKERFILE` /
+`dockerfilePath: server/Dockerfile`. The deploy workflow's path filter now
+includes `web/**`, so a site-only change still redeploys.
