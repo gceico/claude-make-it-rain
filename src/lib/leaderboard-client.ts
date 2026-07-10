@@ -185,10 +185,15 @@ export function normalizeConfig(raw: unknown): LeaderboardConfig {
     apiBaseUrl = DEFAULT_API_BASE_URL;
   }
 
+  // Upper bound is the 32-bit signed max: Node clamps any setInterval delay
+  // above 2^31-1 ms to 1ms, so an out-of-range value (e.g. a user typing a huge
+  // "basically never" number) would turn the reporting timer into a per-ms
+  // request storm. Reject it like any other invalid value -> default.
   const reportIntervalMs =
     typeof cfg.reportIntervalMs === 'number' &&
     isFinite(cfg.reportIntervalMs) &&
-    cfg.reportIntervalMs >= 60000
+    cfg.reportIntervalMs >= 60000 &&
+    cfg.reportIntervalMs <= 2147483647
       ? Math.trunc(cfg.reportIntervalMs)
       : DEFAULT_REPORT_INTERVAL_MS;
 
@@ -295,11 +300,15 @@ export class LeaderboardClient {
   }: LeaderboardClientOptions = {}) {
     this.configDir = configDir || defaultConfigDir();
     this.getTotal = typeof getTotal === 'function' ? getTotal : () => 0;
+    // An explicit `null` means "no network" (see reportNow) and must be
+    // honored; only a missing (undefined) fetchImpl falls back to global fetch.
+    // A `||` fallback would treat null as falsy and silently go live.
     this.fetchImpl =
-      fetchImpl ||
-      (typeof fetch === 'function'
-        ? (fetch.bind(null) as unknown as FetchLike)
-        : null);
+      fetchImpl !== undefined
+        ? fetchImpl
+        : typeof fetch === 'function'
+          ? (fetch.bind(null) as unknown as FetchLike)
+          : null;
     this.onConfigChange =
       typeof onConfigChange === 'function' ? onConfigChange : null;
     this.timer = null;

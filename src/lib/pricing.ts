@@ -66,8 +66,13 @@ export function pricingForModel(model: string | null | undefined): Pricing {
   if (m.includes('opus')) {
     return { inputPerMillion: 5, outputPerMillion: 25 };
   }
-  if (m.includes('haiku-3') || m.includes('3-5-haiku')) {
+  if (m.includes('3-5-haiku')) {
     return { inputPerMillion: 0.8, outputPerMillion: 4 };
+  }
+  // claude-3-haiku-20240307 contains '3-haiku' (but not '3-5-haiku'); its rate
+  // is $0.25/$1.25, distinct from Haiku 3.5's $0.8/$4 above.
+  if (m.includes('3-haiku')) {
+    return { inputPerMillion: 0.25, outputPerMillion: 1.25 };
   }
   if (m.includes('haiku')) {
     return { inputPerMillion: 1, outputPerMillion: 5 };

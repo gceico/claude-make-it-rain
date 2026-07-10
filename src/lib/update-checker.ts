@@ -120,17 +120,25 @@ export class UpdateChecker {
   }: UpdateCheckerOptions = {}) {
     this.currentVersion =
       typeof currentVersion === 'string' ? currentVersion : '0.0.0';
+    // Upper bound is the 32-bit signed max: Node clamps any setInterval delay
+    // above 2^31-1 ms to 1ms, which would turn the interval check into a
+    // per-ms registry request storm. Reject an out-of-range value -> default.
     this.checkIntervalMs =
       typeof checkIntervalMs === 'number' &&
       isFinite(checkIntervalMs) &&
-      checkIntervalMs >= 60000
+      checkIntervalMs >= 60000 &&
+      checkIntervalMs <= 2147483647
         ? Math.trunc(checkIntervalMs)
         : DEFAULT_CHECK_INTERVAL_MS;
+    // An explicit `null` means "no network" (see checkNow) and must be honored;
+    // only a missing (undefined) fetchImpl falls back to global fetch. A `||`
+    // fallback would treat null as falsy and silently go live.
     this.fetchImpl =
-      fetchImpl ||
-      (typeof fetch === 'function'
-        ? (fetch.bind(null) as unknown as CheckFetch)
-        : null);
+      fetchImpl !== undefined
+        ? fetchImpl
+        : typeof fetch === 'function'
+          ? (fetch.bind(null) as unknown as CheckFetch)
+          : null;
     this.onUpdateAvailable =
       typeof onUpdateAvailable === 'function' ? onUpdateAvailable : null;
     this.registryUrl = registryUrl || REGISTRY_URL;

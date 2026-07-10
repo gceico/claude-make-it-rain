@@ -109,6 +109,13 @@ test('normalizeConfig', () => {
     normalizeConfig({ reportIntervalMs: 5 }).reportIntervalMs,
     DEFAULT_REPORT_INTERVAL_MS
   );
+  // Out-of-range (> 2^31-1 ms) is rejected too: Node would clamp such a
+  // setInterval delay to 1ms, turning reporting into a per-ms request storm.
+  assert.strictEqual(
+    normalizeConfig({ reportIntervalMs: 9999999999000 }).reportIntervalMs,
+    DEFAULT_REPORT_INTERVAL_MS,
+    'over-32-bit interval -> default (no per-ms storm)'
+  );
   // Empty tag string -> a fresh tag is generated.
   assert.ok(
     normalizeConfig({ gamerTag: '   ' }).gamerTag.length > 0,
@@ -405,6 +412,20 @@ test('client reporting (payload minimalism, disable, fail-silent)', async () => 
     fetchImpl: async () => ({ ok: false, status: 500 }),
   });
   assert.strictEqual(await c4.reportNow(), false, 'bad status -> false');
+
+  // Explicit fetchImpl: null means "no network" and must be honored (never
+  // replaced with global fetch), so reportNow short-circuits to false.
+  const c5 = new LeaderboardClient({
+    configDir: path.join(tmpRoot, 'report5'),
+    getTotal: () => 5,
+    fetchImpl: null,
+  });
+  assert.strictEqual(c5.fetchImpl, null, 'explicit null fetchImpl preserved');
+  assert.strictEqual(
+    await c5.reportNow(),
+    false,
+    'null fetchImpl -> false, no network'
+  );
 });
 
 test('apiBaseUrlOverride: in-memory only, validated, wins over config', async () => {

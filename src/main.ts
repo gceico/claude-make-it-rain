@@ -57,6 +57,10 @@ interface OverlayEntry {
   win: BrowserWindow;
   ready: boolean;
   pending: PendingMessage[];
+  // Wall-clock ms of the last flush that actually sent messages. Guards against
+  // hiding the window on a stale in-flight 'overlay-idle' that races a freshly
+  // flushed animation (see the 'overlay-idle' handler).
+  lastFlushAt: number;
 }
 
 // ── Globals ─────────────────────────────────────────────────────────────────
@@ -282,8 +286,15 @@ function runUpdate(): void {
   rebuildTrayMenu();
 
   const target = availableUpdateVersion;
-  const args = ['install', '-g', `${UPDATE_PACKAGE}@latest`];
-  execFile('npm', args, { timeout: 5 * 60 * 1000 }, (err) => {
+  const args = ['install', '-g', `${UPDATE_PACKAGE}@${target}`];
+  // On Windows the npm CLI is npm.cmd, which cannot be spawned without a shell
+  // (Node throws EINVAL for implicit .cmd spawns since CVE-2024-27980); with
+  // shell:true cmd.exe resolves npm.cmd via PATHEXT. shell:true is safe here
+  // ONLY because every argv element is a static literal (UPDATE_PACKAGE const +
+  // 'install'/'-g'/`target`, already validated by the update checker's
+  // parseVersion) — no shell interpolation, preserving the doc-comment invariant.
+  const isWin = process.platform === 'win32';
+  execFile('npm', args, { timeout: 5 * 60 * 1000, shell: isWin }, (err) => {
     updateInProgress = false;
     if (err) {
       notify('Make It Rain', 'Update failed — opening the releases page.');
@@ -391,7 +402,12 @@ function createOverlayForDisplay(display: Display): OverlayEntry {
   });
   makeOverlayFloat(win);
 
-  const entry: OverlayEntry = { win, ready: false, pending: [] };
+  const entry: OverlayEntry = {
+    win,
+    ready: false,
+    pending: [],
+    lastFlushAt: 0,
+  };
   overlays.set(display.id, entry);
 
   // The overlay HTML lives at the app root (kept alongside package.json,
@@ -439,10 +455,13 @@ function flushOverlay(entry: OverlayEntry): void {
   // Re-assert the float level in case the window was recreated or the OS
   // demoted it while hidden.
   makeOverlayFloat(entry.win);
-  for (const { channel, payload } of entry.pending) {
-    entry.win.webContents.send(channel, payload);
+  if (entry.pending.length > 0) {
+    for (const { channel, payload } of entry.pending) {
+      entry.win.webContents.send(channel, payload);
+    }
+    entry.pending = [];
+    entry.lastFlushAt = Date.now();
   }
-  entry.pending = [];
 }
 
 // Rain plays everywhere, but the coin shimmer plays only on the primary
@@ -492,7 +511,12 @@ function stacksFromTray(count: number): void {
 ipcMain.on('overlay-idle', (event: IpcMainEvent) => {
   for (const entry of overlays.values()) {
     if (entry.win.webContents === event.sender) {
-      if (entry.pending.length === 0) entry.win.hide();
+      // Ignore a stale idle report that raced a just-flushed animation: every
+      // animation runs >= 1.8 s plus the renderer's 500 ms idle debounce, so a
+      // genuine idle report always arrives well beyond 1 s after the last
+      // flush, while an in-flight stale one arrives within milliseconds of it.
+      if (entry.pending.length === 0 && Date.now() - entry.lastFlushAt > 1000)
+        entry.win.hide();
       break;
     }
   }

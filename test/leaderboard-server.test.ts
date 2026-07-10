@@ -22,7 +22,7 @@ const tmpDir = mkdtempSync(join(tmpdir(), 'mir-server-test-'));
 const dbPath = join(tmpDir, 'lb.db');
 const staticDir = join(tmpDir, 'public');
 
-// Rate-limit ceiling for the in-process server. Set comfortably above the ~17
+// Rate-limit ceiling for the in-process server. Set comfortably above the ~19
 // POSTs the rest of this suite fires from 127.0.0.1 so those never trip, while
 // the dedicated rate-limit test floods a DISTINCT client IP (via x-forwarded-
 // for) so it exercises the limiter in isolation without affecting other cases.
@@ -258,4 +258,48 @@ test('security headers (nosniff + JSON type + CSP on HTML)', async () => {
   const csp = page.headers.get('content-security-policy') || '';
   expect(csp).toBeTruthy();
   expect(/default-src 'none'/.test(csp)).toBe(true);
+});
+
+test('non-JSON report body is rejected with 400 invalid_json', async () => {
+  const res = await rawPost('/api/report', 'not json');
+  expect(res.status).toBe(400);
+  expect(JSON.parse(res.body).error).toBe('invalid_json');
+});
+
+test('GET /health returns 200 { ok: true }', async () => {
+  const res = await request('GET', '/health');
+  expect(res.status).toBe(200);
+  expect(JSON.parse(res.body)).toEqual({ ok: true });
+});
+
+test('unknown POST path falls through to 404 not_found', async () => {
+  // Does not hit POST /api/report, so the rate limiter is never invoked.
+  const res = await request('POST', '/api/nonexistent');
+  expect(res.status).toBe(404);
+  expect(JSON.parse(res.body).error).toBe('not_found');
+});
+
+test('static serving never escapes staticDir (traversal + containment)', async () => {
+  // The DB file lives one level above staticDir; none of these shapes may
+  // reach it. Bun's fetch client normalizes both '%2e%2e' and literal '../'
+  // out of the path before it hits the wire, so over HTTP these arrive as
+  // '/lb.db' and 404 inside staticDir (the DB is not in staticDir).
+  const encoded = await request('GET', '/%2e%2e/lb.db');
+  expect(encoded.status).toBe(404);
+  expect(encoded.body.includes('SQLite')).toBe(false);
+
+  const literal = await request('GET', '/../lb.db');
+  expect(literal.status).toBe(404);
+  expect(literal.body.includes('SQLite')).toBe(false);
+
+  // The startsWith containment branch itself is unreachable through a
+  // normalizing HTTP client, so drive the handler directly: a Request keeps
+  // pathname '//', which strips to rel '' so filePath equals staticDir with
+  // no trailing separator — the exact shape the guard exists for.
+  const containment = await running.app.fetch(
+    new Request(`${baseUrl}//`),
+    running.server
+  );
+  expect(containment.status).toBe(403);
+  expect((await containment.text()).includes('SQLite')).toBe(false);
 });
