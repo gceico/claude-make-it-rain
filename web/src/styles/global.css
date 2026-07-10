@@ -162,7 +162,7 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   text-wrap: balance;
 }
 .pills {
-  margin-top: 18px;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -210,6 +210,62 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 }
 .tally .cap { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
 .tally .cap b { color: var(--muted-strong); font-weight: 600; }
+
+/* ── Get started ───────────────────────────────────────────────────────── */
+/* Two compact click-to-copy command rows. Deliberately low-profile so the
+   leaderboard stays the star of the page. */
+.install {
+  margin: clamp(20px, 4vh, 30px) auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 460px;
+}
+.install .cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color .22s var(--ease-out), background .22s var(--ease-out);
+}
+.install .cmd:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line-solid)); }
+.install .cmd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.install .cmd.copied { border-color: color-mix(in oklab, var(--accent) 60%, transparent); }
+.install .prompt {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--accent);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.install .cmd code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.8rem, 2.6vw, 0.92rem);
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+.install .copy {
+  flex: none;
+  font: 600 0.72rem/1 var(--sans);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  -webkit-user-select: none;
+  user-select: none;
+  transition: color .22s var(--ease-out);
+}
+.install .cmd:hover .copy { color: var(--muted-strong); }
+.install .cmd.copied .copy { color: var(--accent); }
 
 /* ── Board ─────────────────────────────────────────────────────────────── */
 .board {

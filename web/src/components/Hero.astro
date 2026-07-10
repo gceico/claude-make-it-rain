@@ -1,4 +1,6 @@
 ---
+import Install from "./Install.astro";
+
 // Hero: wordmark, tagline, the "leaderboard of <date>" + "resets in <countdown>"
 // pills, and today's combined tally (hidden until the board loads with entries).
 // The date, countdown and tally values are populated client-side.
@@ -9,6 +11,7 @@
   <p class="tagline">
     The daily leaderboard of who made it rain hardest on Claude&nbsp;Code.
   </p>
+  <Install />
   <div class="pills">
     <div class="datepill">
       <span class="dot"></span> Leaderboard of <span class="date" id="date"
