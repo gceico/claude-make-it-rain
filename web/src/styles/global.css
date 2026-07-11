@@ -1,4 +1,4 @@
-    /* Big Shoulders Display — condensed industrial display for the wordmark and
+    /* Big Shoulders Display, condensed industrial display for the wordmark and
    the headline figure. Embedded as a data URI: the page CSP pins everything
    to self, so no external font host is reachable. Latin subset, ~14KB. */
 @font-face {
@@ -128,6 +128,166 @@ a { color: inherit; }
 .ghstar .count .star-ico { width: 13px; height: 13px; fill: var(--gold); }
 .ghstar .count.pending { opacity: 0; }
 
+/* The top bar now holds two pills (About + Star); space them without letting the
+   row lose its right alignment. */
+.topbar { gap: 10px; }
+/* "About" pill: same shape as the star pill, rendered as a <button>. */
+.ghstar.about-trigger { cursor: pointer; font: 600 0.86rem/1 var(--sans); }
+
+/* ── About dialog ──────────────────────────────────────────────────────────
+   Native <dialog>. Full story ships in the HTML (indexable) and only becomes
+   visible on open. Backdrop dims the page; the panel matches the surface cards. */
+dialog.about {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(84vh, 760px);
+  padding: 0;
+  border: 1px solid var(--line-solid);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--surface-2) 0, var(--surface) 60%);
+  color: var(--ink);
+  box-shadow: 0 40px 120px -40px #000e, 0 0 0 1px #ffffff0a inset;
+  overflow: hidden;
+}
+dialog.about::backdrop {
+  background: color-mix(in oklab, var(--bg) 72%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+dialog.about[open] { animation: about-in .32s var(--ease-out) both; }
+dialog.about[open]::backdrop { animation: about-fade .32s var(--ease-out) both; }
+@keyframes about-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes about-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.about-inner {
+  max-height: inherit;
+  overflow-y: auto;
+  padding: clamp(28px, 5vw, 44px) clamp(22px, 5vw, 44px) clamp(28px, 5vw, 40px);
+  -webkit-overflow-scrolling: touch;
+}
+.about-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  margin: -6px -6px 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--surface) 80%, transparent);
+  color: var(--muted-strong);
+  cursor: pointer;
+  transition: color .2s var(--ease-out), border-color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.about-close:hover, .about-close:focus-visible {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--surface-2);
+  outline: none;
+}
+.about-close svg { width: 18px; height: 18px; }
+.about-h {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(2rem, 7vw, 2.9rem);
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+  margin: 0 0 18px;
+  color: var(--accent);
+  text-shadow: 0 0 34px #35d07f30;
+}
+.about-inner p {
+  margin: 0 0 15px;
+  color: var(--muted-strong);
+  font-size: clamp(0.96rem, 2.4vw, 1.02rem);
+  line-height: 1.72;
+}
+.about-inner p b { color: var(--ink); font-weight: 650; }
+.about-inner a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  transition: color .2s, border-color .2s;
+}
+.about-inner a:hover, .about-inner a:focus-visible {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  outline: none;
+}
+.about-inner code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--gold) 12%, transparent);
+  color: var(--gold);
+  border-bottom: 0;
+}
+.about-sig {
+  margin-top: 22px !important;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.about-sig b { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+.about-links { font-size: 0.92rem; color: var(--muted); }
+.about-links a { border-bottom: 0; font-weight: 600; }
+
+/* FAQ accordion — visible counterpart to the FAQPage JSON-LD. Native
+   <details>, so it needs no JS and stays keyboard-accessible. */
+.about-faq {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.about-faq-h {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.about-faq-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.about-faq-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 650;
+  font-size: clamp(0.95rem, 2.4vw, 1.02rem);
+  color: var(--ink);
+  transition: color .2s var(--ease-out);
+}
+.about-faq-item summary::-webkit-details-marker { display: none; }
+.about-faq-item summary:hover { color: var(--accent); }
+.about-faq-item summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+.about-faq-chev {
+  flex: none;
+  width: 18px; height: 18px;
+  color: var(--muted);
+  transition: transform .25s var(--ease-out), color .2s var(--ease-out);
+}
+.about-faq-item[open] .about-faq-chev { transform: rotate(180deg); color: var(--accent); }
+.about-faq-item[open] summary { color: var(--accent); }
+.about-faq-item p {
+  margin: 0 !important;
+  padding: 0 16px 15px;
+  color: var(--muted-strong);
+  font-size: 0.95rem !important;
+  line-height: 1.65;
+}
+
 /* ── Layout ────────────────────────────────────────────────────────────── */
 .wrap {
   position: relative;
@@ -182,7 +342,7 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 }
 .datepill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 0 var(--gold); }
 .datepill .date { font-family: var(--mono); font-weight: 700; }
-/* Reset countdown — neutral so the gold date pill stays the primary accent. */
+/* Reset countdown, neutral so the gold date pill stays the primary accent. */
 .datepill.reset {
   background: color-mix(in oklab, var(--muted-strong) 8%, transparent);
   border-color: color-mix(in oklab, var(--muted-strong) 26%, transparent);
@@ -192,7 +352,7 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 .datepill.reset .date { min-width: 8ch; text-align: center; }
 @keyframes reset-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 
-/* Today's total — the single meaningful headline figure. */
+/* Today's total, the single meaningful headline figure. */
 .tally {
   margin: clamp(22px, 4vh, 34px) auto 0;
   display: none;
@@ -310,7 +470,7 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   white-space: nowrap;
 }
 
-/* Champion — first place gets the gold treatment, no nested card. */
+/* Champion: first place gets the gold treatment, no nested card. */
 .row.champ {
   padding: 20px clamp(16px, 3.5vw, 24px);
   background:
@@ -381,16 +541,24 @@ footer.site {
   background: color-mix(in oklab, var(--surface-2) 85%, transparent);
   outline: none;
 }
+.footlinks {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
 .source-link {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 22px;
   padding: 9px 16px;
   border-radius: 999px;
   border: 1px solid var(--line-solid);
+  background: none;
   color: var(--muted-strong);
   text-decoration: none;
+  cursor: pointer;
   font: 600 0.88rem/1 var(--sans);
   transition: color .22s var(--ease-out), border-color .22s var(--ease-out);
 }
@@ -412,5 +580,7 @@ footer.site {
 @media (prefers-reduced-motion: reduce) {
   .rain { display: none; }
   .reveal, .tally.show, .skel::after { animation: none; }
-  .row, .ghstar, .social, .source-link { transition: none; }
+  dialog.about[open], dialog.about[open]::backdrop { animation: none; }
+  .row, .ghstar, .social, .source-link, .about-close { transition: none; }
+  .about-faq-item summary, .about-faq-chev { transition: none; }
 }

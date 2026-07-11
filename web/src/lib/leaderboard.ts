@@ -1,5 +1,5 @@
 /**
- * Make It Rain — client-side leaderboard/stars/rain logic.
+ * Make It Rain client-side leaderboard/stars/rain logic.
  *
  * Typed port of the original single-file inline script. Runs in the browser on
  * the statically-built page; every API call is same-origin and relative so it
@@ -110,7 +110,7 @@ function loadStars(): void {
       count.classList.remove('pending');
     })
     .catch(() => {
-      /* fail silently — the pill still links to the repo */
+      /* fail silently, the pill still links to the repo */
     });
 }
 

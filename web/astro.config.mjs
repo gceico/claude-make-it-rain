@@ -5,6 +5,9 @@ import { defineConfig } from 'astro/config';
 // leaderboard backend, so all runtime API calls use relative URLs
 // (/api/leaderboard, /api/stars). No SSR, no adapter, no UI framework.
 export default defineConfig({
+  // Public origin the built page is served from. Drives the canonical link and
+  // absolute og:url in the layout head (used for SEO / social share cards).
+  site: 'https://aiburn.dev',
   output: 'static',
   // web/dist is Astro's default outDir; kept explicit for the build contract.
   outDir: './dist',
