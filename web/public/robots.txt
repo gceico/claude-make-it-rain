@@ -1,0 +1,6 @@
+# Make It Rain: everyone welcome, including AI answer engines.
+# (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, etc. all fall under *.)
+User-agent: *
+Allow: /
+
+Sitemap: https://aiburn.dev/sitemap.xml

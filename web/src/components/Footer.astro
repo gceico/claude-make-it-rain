@@ -44,13 +44,18 @@ const REPO_URL = 'https://github.com/gceico/claude-make-it-rain';
     </a>
   </div>
 
-  <a class="source-link" href={REPO_URL} target="_blank" rel="noopener">
-    <GithubIcon />
-    View the source on GitHub
-  </a>
+  <div class="footlinks">
+    <button class="source-link" type="button" data-about-open>
+      About Make It Rain
+    </button>
+    <a class="source-link" href={REPO_URL} target="_blank" rel="noopener">
+      <GithubIcon />
+      View the source on GitHub
+    </a>
+  </div>
 
   <p class="fineprint">
-    Only an anonymous tag and today's estimated total are ever shown — no
+    Only an anonymous tag and today's estimated total are ever shown. No
     accounts, no emails, no personal data. The leaderboard resets daily (UTC).
   </p>
   <p class="credit">

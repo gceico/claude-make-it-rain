@@ -6,6 +6,8 @@ import '../styles/global.css';
 import Rain from '../components/Rain.astro';
 import TopBar from '../components/TopBar.astro';
 import Footer from '../components/Footer.astro';
+import About from '../components/About.astro';
+import { FAQ } from '../lib/faq';
 
 interface Props {
   title?: string;
@@ -13,9 +15,66 @@ interface Props {
 }
 
 const {
-  title = 'Make It Rain — Leaderboard of the Day',
+  title = 'Make It Rain: Leaderboard of the Day',
   description = "The daily leaderboard of who made it rain hardest on Claude Code. Anonymous tags, today's estimated spend, resets daily.",
 } = Astro.props;
+
+// Canonical + absolute social URLs. Astro.site is set in astro.config
+// (https://aiburn.dev); fall back to it directly for the static single-page
+// build so the tags are absolute even if a page omits a path.
+const SITE = Astro.site ?? new URL('https://aiburn.dev');
+const canonical = new URL(Astro.url.pathname, SITE).href;
+
+// Structured data for search + AI answer engines. SoftwareApplication describes
+// the app (with its human author), and FAQPage answers the questions people
+// actually ask (FAQ schema is the single biggest AI-citation boost), and every
+// answer is grounded in the About copy so the page can be quoted verbatim.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${SITE.origin}/#app`,
+      name: 'Make It Rain',
+      applicationCategory: 'DeveloperApplication',
+      operatingSystem: 'macOS, Windows, Linux',
+      url: SITE.origin,
+      description:
+        "Make It Rain is an open-source menu-bar app that watches your Claude Code usage and shows the day's estimated spend. It flies a dollar bill across your screen for every dollar and rains money at $100 milestones, with an optional anonymous daily leaderboard.",
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'USD',
+      },
+      license: 'https://github.com/gceico/claude-make-it-rain/blob/main/LICENSE',
+      isAccessibleForFree: true,
+      downloadUrl: 'https://www.npmjs.com/package/@gceico/claude-make-it-rain',
+      author: {
+        '@type': 'Person',
+        '@id': 'https://aibl.to/#gabriel',
+        name: 'Gabriel Ceicoschi',
+        jobTitle: 'Software Engineer',
+        url: 'https://aibl.to/',
+        sameAs: [
+          'https://www.linkedin.com/in/gceico/',
+          'https://x.com/gceico',
+          'https://github.com/gceico',
+        ],
+      },
+    },
+    {
+      '@type': 'FAQPage',
+      '@id': `${SITE.origin}/#faq`,
+      // Built from the same FAQ array the About dialog renders, so the
+      // structured data always matches the visible on-page content.
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: item.a },
+      })),
+    },
+  ],
+};
 ---
 
 <!doctype html>
@@ -25,14 +84,16 @@ const {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
 
-    <!-- Open Graph / Twitter — social share cards (an addition over the
+    <!-- Open Graph / Twitter social share cards (an addition over the
          original page, which had none). No remote image is referenced so the
          self-only CSP is unaffected. -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:site_name" content="Make It Rain" />
+    <meta property="og:url" content={canonical} />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
@@ -41,11 +102,17 @@ const {
          identity; served same-origin. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="generator" content={Astro.generator} />
+
+    <!-- Structured data: describes the app + its author and answers the FAQ,
+         so search and AI answer engines can index and cite the About story.
+         set:html on a script tag keeps the JSON as a literal payload. -->
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
   </head>
   <body>
     <Rain />
     <TopBar />
     <slot />
     <Footer />
+    <About />
   </body>
 </html>

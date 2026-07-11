@@ -132,7 +132,7 @@ function historyMenuItem(range: Range): MenuItemConstructorOptions {
   const stacks = billStacks(data.totalCostUSD);
   const rainDays = rainDayCount(data.days);
   let label = `${range.label}: $${data.totalCostUSD.toFixed(2)}`;
-  if (stacks) label += ` — ${stacks}`;
+  if (stacks) label += ` · ${stacks}`;
   if (rainDays > 0)
     label += ` (${rainDays} rain day${rainDays === 1 ? '' : 's'})`;
 
@@ -222,9 +222,9 @@ function rebuildTrayMenu(): void {
     {
       label: 'Test animations',
       submenu: [
-        { label: 'Stack of Money — $10', click: () => stacksFromTray(1) },
-        { label: 'Five Stacks — $50', click: () => stacksFromTray(5) },
-        { label: 'Make It Rain — $100', click: () => rainAllDisplays() },
+        { label: 'Stack of Money: $10', click: () => stacksFromTray(1) },
+        { label: 'Five Stacks: $50', click: () => stacksFromTray(5) },
+        { label: 'Make It Rain: $100', click: () => rainAllDisplays() },
       ],
     },
     {
@@ -297,7 +297,7 @@ function runUpdate(): void {
   execFile('npm', args, { timeout: 5 * 60 * 1000, shell: isWin }, (err) => {
     updateInProgress = false;
     if (err) {
-      notify('Make It Rain', 'Update failed — opening the releases page.');
+      notify('Make It Rain', 'Update failed. Opening the releases page.');
       try {
         shell.openExternal(RELEASES_URL);
       } catch {
@@ -309,7 +309,7 @@ function runUpdate(): void {
     // Installed the new global binary; the running process still holds the old
     // code, so a restart is required to pick it up.
     availableUpdateVersion = null;
-    notify('Make It Rain', `Updated to v${target} — quit and restart to apply`);
+    notify('Make It Rain', `Updated to v${target}. Quit and restart to apply.`);
     rebuildTrayMenu();
   });
 }
@@ -330,9 +330,7 @@ function applySnapshot(snapshot: Snapshot): void {
     tray.setTitle(formatTitle(snapshot.totalCostUSD));
   }
   if (tray)
-    tray.setToolTip(
-      `Make It Rain — today: $${snapshot.totalCostUSD.toFixed(2)}`
-    );
+    tray.setToolTip(`Make It Rain today: $${snapshot.totalCostUSD.toFixed(2)}`);
   rebuildTrayMenu();
 }
 

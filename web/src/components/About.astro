@@ -1,0 +1,169 @@
+---
+// About: the story behind Make It Rain, exposed as a native <dialog>. The full
+// prose ships in the static HTML (inside the closed dialog it is still in the
+// DOM), so search crawlers and AI answer engines index it at the site's top
+// authority URL, so it can be cited. Opened by any [data-about-open]
+// trigger (top bar + footer), closed by the ✕, backdrop click, or Escape.
+// Lives once in the Layout; triggers only reference it by id.
+//
+// The FAQ at the bottom renders from the shared FAQ array; Layout.astro emits
+// the same array as FAQPage JSON-LD, so schema and visible content stay in sync.
+import { FAQ } from '../lib/faq';
+---
+
+<dialog id='aboutDialog' class='about' aria-labelledby='aboutTitle'>
+  <article class='about-inner'>
+    <button
+      class='about-close'
+      type='button'
+      data-about-close
+      aria-label='Close'
+    >
+      <svg viewBox='0 0 24 24' aria-hidden='true'
+        ><path
+          d='M6 6l12 12M18 6L6 18'
+          stroke='currentColor'
+          stroke-width='2'
+          stroke-linecap='round'
+          fill='none'></path></svg
+      >
+    </button>
+
+    <h2 id='aboutTitle' class='about-h'>about.</h2>
+
+    <p>
+      How to make fun of your own AI spend, and learn from it. <b
+        >Make It Rain</b
+      > 💸
+    </p>
+
+    <p>
+      A while back I spent a weekend reading three months of my Claude usage,
+      one conversation at a time. I'd burned hundreds of dollars, and most of it
+      went to cached tokens the model had already seen. I was paying to re-feed
+      the same context into the same model because I'd never cleaned up my
+      workflow. I wrote it up in <a
+        href='https://aibl.to/blog/ai-productivity-effectiveness-ratio/'
+        target='_blank'
+        rel='noopener'>Your AI framework sucks.</a
+      >
+    </p>
+
+    <p>
+      So I figured that usage pricing removes the hiding place. For eight years
+      as a software engineer, I or my employer paid for seats I used at ten
+      percent. Jira, Teams, the Copilot licenses bought in bulk and left to rot.
+      The invoice looked the same whether I mastered the tool or ignored it.
+      Usage-priced AI flips that. A bloated context shows up on the bill. So
+      does running Opus to proofread a two-line email. The discomfort teaches.
+    </p>
+
+    <p>
+      If the number finally tells you more than a warm seat ever did, it should
+      not live in a dashboard I never open. So Make It Rain puts it on your menu
+      bar. Each dollar of Claude Code spend flies a bill across your screen. Each
+      hundred sets off a rain of cash. It's the most useful cost meter I've run,
+      because I feel the spend as it happens. "Yes, but we have /usage," haha,
+      right, but where's the fun in that?
+    </p>
+
+    <p>
+      The leaderboard is there to comfort you, because you know someone out
+      there burns more. Every day, <a
+        href='https://aiburn.dev'
+        target='_blank'
+        rel='noopener'>aiburn.dev</a
+      > ranks who made it rain hardest, under a random tag like <code
+        >TurboLlama7392</code
+      > that you can reroll any time. That tag and today's total are the only things that
+      leave your machine, and the server forgets them by tomorrow. No account, no
+      email, no prompts, nothing that points back at you. After writing <a
+        href='https://aibl.to/blog/claude-code-opentelemetry-not-only-cost-tracking/'
+        target='_blank'
+        rel='noopener'>three thousand words on how creepy telemetry gets</a
+      >, I wasn't going to build any.
+    </p>
+
+    <p>
+      Most of what I do at <a
+        href='https://aibl.to/'
+        target='_blank'
+        rel='noopener'>Aibl.to</a
+      >, the workshops and the writing, comes down to one idea: work with AI on
+      purpose instead of on autopilot. Make It Rain is the loud end of that
+      idea. It's open source, it runs on your machine, and even the leaderboard
+      server is a few hundred dependency-free lines you can run yourself. The
+      dollar figure stays a rough estimate on purpose, because the point is
+      attention, not accounting.
+    </p>
+
+    <p>
+      I'm a software engineer helping professionals get compounded value from
+      AI. I build things like this when I need them, and I ship the ones that
+      turn out good. This one turned out good.
+    </p>
+
+    <section class='about-faq' aria-label='Frequently asked questions'>
+      <h3 class='about-faq-h'>questions.</h3>
+      {
+        FAQ.map((item) => (
+          <details class='about-faq-item'>
+            <summary>
+              <span>{item.q}</span>
+              <svg class='about-faq-chev' viewBox='0 0 24 24' aria-hidden='true'>
+                <path
+                  d='M6 9l6 6 6-6'
+                  stroke='currentColor'
+                  stroke-width='2'
+                  stroke-linecap='round'
+                  stroke-linejoin='round'
+                  fill='none'
+                />
+              </svg>
+            </summary>
+            <p>{item.a}</p>
+          </details>
+        ))
+      }
+    </section>
+
+    <p class='about-sig'>
+      <b>Gabriel Ceicoschi</b>
+      <span class='about-links'>
+        <a
+          href='https://www.linkedin.com/in/gceico/'
+          target='_blank'
+          rel='noopener'>linkedin</a
+        > ·
+        <a href='https://x.com/gceico' target='_blank' rel='noopener'>x</a> ·
+        <a href='https://github.com/gceico' target='_blank' rel='noopener'
+          >github</a
+        > ·
+        <a href='https://aibl.to/' target='_blank' rel='noopener'>aibl.to</a>
+      </span>
+    </p>
+  </article>
+</dialog>
+
+<script>
+  // Wire every [data-about-open] trigger to the dialog, and close on the ✕,
+  // a backdrop click, or Escape (native <dialog> handles Escape itself).
+  const dialog = document.getElementById(
+    'aboutDialog'
+  ) as HTMLDialogElement | null;
+  if (dialog) {
+    for (const t of document.querySelectorAll('[data-about-open]')) {
+      t.addEventListener('click', e => {
+        e.preventDefault();
+        dialog.showModal();
+      });
+    }
+    for (const c of dialog.querySelectorAll('[data-about-close]')) {
+      c.addEventListener('click', () => dialog.close());
+    }
+    // Click on the backdrop (outside .about-inner) closes the dialog.
+    dialog.addEventListener('click', e => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+</script>
