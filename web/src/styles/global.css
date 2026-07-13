@@ -379,7 +379,6 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 460px;
 }
 .install .cmd {
   display: flex;
