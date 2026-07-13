@@ -54,7 +54,7 @@
     "lint": "oxlint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:app": "bun test test/usage-monitor.test.ts test/delight.test.ts test/leaderboard-client.test.ts test/history.test.ts test/update-checker.test.ts",
+    "test:app": "bun test test/usage-monitor.test.ts test/delight.test.ts test/equivalences.test.ts test/leaderboard-client.test.ts test/history.test.ts test/update-checker.test.ts",
     "test:server": "bun test test/leaderboard-db.test.ts test/leaderboard-server.test.ts",
     "test": "bun run test:app && bun run test:server",
     "prepublishOnly": "bun run build && bun run test:app"

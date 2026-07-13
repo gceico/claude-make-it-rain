@@ -12,6 +12,14 @@
  * == the latest complete figure and is robust to a client that momentarily
  * reports a lower number). Only anonymized tags + totals are stored — no IPs,
  * timestamps-per-user, or any other identifying data.
+ *
+ * A second table, `hourly(day, hour, spend)`, powers the collective-spend graph:
+ * as each report arrives we add only its POSITIVE increment (new total minus the
+ * tag's previously-stored total) to the bucket for the current UTC hour. That
+ * keeps the graph honest — `SUM(hourly.spend) == SUM(leaderboard.total)` for a
+ * day — while storing only an aggregate curve, never per-user timestamps. This is
+ * the awareness centerpiece: it shows WHEN the community spends (working-hour
+ * peaks, overnight valleys), not WHO spent the most.
  */
 
 import { Database, type Statement } from 'bun:sqlite';
@@ -23,8 +31,23 @@ export interface LeaderboardEntry {
   total: number;
 }
 
+/** One bucket of the collective-spend curve: spend recorded during `hour` (UTC). */
+export interface HourlyBucket {
+  hour: number;
+  spend: number;
+}
+
 interface TotalRow {
   total: number;
+}
+
+interface SpendRow {
+  spend: number;
+}
+
+interface HourRow {
+  hour: number;
+  spend: number;
 }
 
 const DEFAULT_DB = join(import.meta.dir, 'data', 'leaderboard.db');
@@ -36,6 +59,11 @@ export class LeaderboardDB {
   private readonly getStmt: Statement;
   private readonly boardStmt: Statement;
   private readonly pruneStmt: Statement;
+  private readonly bumpHourStmt: Statement;
+  private readonly hourlyStmt: Statement;
+  private readonly totalStmt: Statement;
+  private readonly countStmt: Statement;
+  private readonly pruneHourlyStmt: Statement;
 
   constructor(filePath?: string) {
     this.filePath = filePath || process.env.LEADERBOARD_DB || DEFAULT_DB;
@@ -49,6 +77,17 @@ export class LeaderboardDB {
         'tag TEXT NOT NULL, ' +
         'total REAL NOT NULL, ' +
         'PRIMARY KEY (day, tag)' +
+        ');'
+    );
+    // Aggregate-only collective-spend curve: one row per (day, hour). No tags,
+    // no per-user timestamps — just how much the whole community spent in each
+    // UTC hour of the day.
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS hourly (' +
+        'day TEXT NOT NULL, ' +
+        'hour INTEGER NOT NULL, ' +
+        'spend REAL NOT NULL, ' +
+        'PRIMARY KEY (day, hour)' +
         ');'
     );
 
@@ -66,6 +105,22 @@ export class LeaderboardDB {
     this.pruneStmt = this.db.query(
       'DELETE FROM leaderboard WHERE day NOT IN (?, ?);'
     );
+    this.bumpHourStmt = this.db.query(
+      'INSERT INTO hourly (day, hour, spend) VALUES (?, ?, ?) ' +
+        'ON CONFLICT(day, hour) DO UPDATE SET spend = spend + excluded.spend;'
+    );
+    this.hourlyStmt = this.db.query(
+      'SELECT hour, spend FROM hourly WHERE day = ? ORDER BY hour ASC;'
+    );
+    this.totalStmt = this.db.query(
+      'SELECT COALESCE(SUM(total), 0) AS spend FROM leaderboard WHERE day = ?;'
+    );
+    this.countStmt = this.db.query(
+      'SELECT COUNT(*) AS spend FROM leaderboard WHERE day = ?;'
+    );
+    this.pruneHourlyStmt = this.db.query(
+      'DELETE FROM hourly WHERE day NOT IN (?, ?);'
+    );
   }
 
   /** UTC calendar day, e.g. "2026-07-09". */
@@ -73,12 +128,26 @@ export class LeaderboardDB {
     return now.toISOString().slice(0, 10);
   }
 
-  /** Record a report; keeps the max total for (day, tag). Returns stored total. */
+  /**
+   * Record a report; keeps the max total for (day, tag). Returns stored total.
+   *
+   * The POSITIVE increment over this tag's previously-stored total is added to
+   * the current UTC hour's collective bucket, so the hourly curve reflects when
+   * spend actually happened. A client that restarts and re-reports a lower (or
+   * equal) number contributes a zero delta and never double-counts.
+   */
   report(
     tag: string,
     total: number,
-    day: string = LeaderboardDB.today()
+    day: string = LeaderboardDB.today(),
+    now: Date = new Date()
   ): number {
+    const prevRow = this.getStmt.get(day, tag) as TotalRow | null;
+    const prev = prevRow ? prevRow.total : 0;
+    const delta = total > prev ? total - prev : 0;
+    if (delta > 0) {
+      this.bumpHourStmt.run(day, now.getUTCHours(), delta);
+    }
     this.reportStmt.run(day, tag, total);
     this.pruneOldDays(day);
     const row = this.getStmt.get(day, tag) as TotalRow | null;
@@ -93,12 +162,45 @@ export class LeaderboardDB {
     return this.boardStmt.all(day, limit) as LeaderboardEntry[];
   }
 
+  /**
+   * The collective-spend curve for a day: 24 zero-filled buckets (hour 0..23),
+   * so the graph always has a full x-axis even before spend arrives.
+   */
+  hourlySeries(day: string = LeaderboardDB.today()): HourlyBucket[] {
+    const rows = this.hourlyStmt.all(day) as HourRow[];
+    const buckets: HourlyBucket[] = [];
+    for (let h = 0; h < 24; h++) buckets.push({ hour: h, spend: 0 });
+    for (const r of rows) {
+      if (r.hour >= 0 && r.hour < 24) buckets[r.hour]!.spend = r.spend;
+    }
+    return buckets;
+  }
+
+  /** Sum of every tag's total for a day (the collective headline figure). */
+  collectiveTotal(day: string = LeaderboardDB.today()): number {
+    const row = this.totalStmt.get(day) as SpendRow | null;
+    return row ? row.spend : 0;
+  }
+
+  /** How many distinct tags reported spend on a day. */
+  activeTags(day: string = LeaderboardDB.today()): number {
+    const row = this.countStmt.get(day) as SpendRow | null;
+    return row ? row.spend : 0;
+  }
+
+  /** A single tag's stored total for a day, or 0 if it hasn't reported. */
+  tagTotal(tag: string, day: string = LeaderboardDB.today()): number {
+    const row = this.getStmt.get(day, tag) as TotalRow | null;
+    return row ? row.total : 0;
+  }
+
   /** Drop days other than today + yesterday so the DB can't grow forever. */
   private pruneOldDays(today: string): void {
     const yesterday = LeaderboardDB.today(
       new Date(Date.parse(today + 'T00:00:00Z') - 86400000)
     );
     this.pruneStmt.run(today, yesterday);
+    this.pruneHourlyStmt.run(today, yesterday);
   }
 
   /**

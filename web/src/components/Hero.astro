@@ -1,22 +1,22 @@
 ---
 import Install from "./Install.astro";
 
-// Hero: wordmark, tagline, the "leaderboard of <date>" + "resets in <countdown>"
-// pills, and today's combined tally (hidden until the board loads with entries).
-// The date, countdown and tally values are populated client-side.
+// Hero: wordmark, tagline, the "Today <date>" + "resets in <countdown>" pills,
+// and today's COLLECTIVE tally — the whole community's combined spend, with a
+// tangible equivalence — instead of a single top spender. The date, countdown,
+// tally and equivalence values are populated client-side.
 ---
 
 <header class="hero">
   <h1 class="wordmark"><span class="rain-emoji">💸</span> Make It Rain</h1>
   <p class="tagline">
-    The daily leaderboard of who made it rain hardest on Claude&nbsp;Code.
+    Every dollar of Claude&nbsp;Code spend, made impossible to ignore — and added
+    up across everyone using it.
   </p>
   <Install />
   <div class="pills">
     <div class="datepill">
-      <span class="dot"></span> Leaderboard of <span class="date" id="date"
-        >…</span
-      >
+      <span class="dot"></span> Today <span class="date" id="date">…</span>
     </div>
     <div class="datepill reset">
       <span class="dot"></span> Resets in <span class="date" id="countdown"
@@ -28,9 +28,10 @@ import Install from "./Install.astro";
   <div class="tally" id="tally">
     <div class="amt" id="tallyAmt">$0.00</div>
     <p class="cap">
-      Made it rain today across <b id="tallyCount">0</b>
-      <span id="tallyNoun"> spenders</span>.<br/>Each total updates every 10&nbsp;min
-      while their app is running.
+      Spent together today by <b id="tallyCount">0</b>
+      <span id="tallyNoun"> builders</span>.<br />Each total updates every
+      10&nbsp;min while their app is running.
     </p>
+    <p class="collective-eq" id="collectiveEq"></p>
   </div>
 </header>
