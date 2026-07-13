@@ -352,7 +352,7 @@ low-frequency background sweeper drops expired buckets so the map stays
 memory-bounded; the sweeper is `.unref()`'d so it never keeps the process alive
 (tests/CLI exit cleanly).
 
-**Rationale.** Legit clients report at most hourly, so 60/min/IP never
+**Rationale.** Legit clients report every ~10 minutes, so 60/min/IP never
 inconveniences a real user while stopping a trivial single-source flood.
 
 **Tradeoffs / accepted risks.** Trusting the rightmost `x-forwarded-for` entry
@@ -453,9 +453,12 @@ independent source of truth for anyone's Claude Code spend.
 **Decision.** Do not attempt to prevent a user from inflating their **own**
 number. It is fundamentally unsolvable for a self-reported metric.
 
-**Rationale.** This is a fun/vanity board, not a system of record. The only
+**Rationale.** This is an awareness aid, not a system of record. The only
 defenses that make sense are bounding absurd values (the `MAX_TOTAL` cap, §3.3)
-and slowing floods (the rate limiter, §3.5).
+and slowing floods (the rate limiter, §3.5). Crucially, the board is now a
+**collective** curve rather than a ranking (§4.4), so self-inflation buys nothing:
+one padded total barely moves the aggregate and there is no rank to climb. The
+incentive to lie is gone by design.
 
 **Tradeoffs / accepted risks.** Someone can report any value up to the cap.
 Consciously accepted.
@@ -508,6 +511,43 @@ tightening.
 
 **Status.** Accepted (design consequence of §4.2).
 
+### 4.4 Collective curve instead of a ranked leaderboard
+
+**Context.** The original board sorted everyone `total DESC` and crowned a daily
+champion. For an app whose whole purpose is spending _awareness_, a "who spent the
+most" ranking sends exactly the wrong signal — it gamifies burning more.
+
+**Decision.** Reframe the social layer from competition to awareness:
+
+- The public centerpiece is the **collective** spend curve: `GET /api/collective`
+  returns `{ date, total, activeTags, hours: [{hour, spend}] }`, a 24-bucket hourly
+  series of the whole community's spend for the UTC day. It shows _when_ the world
+  spends (working-hour peaks, overnight valleys), not who spent most.
+- A new `hourly(day, hour, spend)` table (`server/db.ts`) feeds it. On each report
+  the **positive increment** over the tag's previously-stored total is added to the
+  current UTC hour's bucket, so `SUM(hourly.spend) == SUM(leaderboard.total)` and a
+  client that restarts / re-reports a lower number never double-counts. It stores an
+  aggregate curve only — no per-user timestamps — and is pruned to today+yesterday
+  like `leaderboard`.
+- Individual spend is reframed as tangible **equivalences** ("≈ 2 burgers", "≈ 10%
+  of a trip to Greece") via `src/lib/equivalences.ts` (canonical) and a mirrored
+  `web/src/lib/equivalences.ts` for the page. `?tag=` on the board page opens a
+  personal reflection view (your total, your share of the collective, and "was it
+  worth building it?"). The ranked `GET /api/leaderboard` endpoint is **kept** but
+  demoted to a light, unranked contributor list — no podium.
+
+**Rationale.** Collective aggregation is more private (sums, not a durable per-user
+ranking) _and_ more robust to trolling (§4.1): the incentive that made a ranked
+board self-defeating simply isn't there.
+
+**Tradeoffs.** The reframed page's client bundle grew past Astro's inline-script
+threshold, so the hoisted module is emitted as a same-origin `/_astro/*.js` file.
+The page CSP (`server/index.ts`) was widened from `script-src 'unsafe-inline'` to
+`script-src 'self' 'unsafe-inline'` — same-origin scripts from our own build are as
+trusted as inline ones, and every remote/external capability stays denied.
+
+**Status.** Shipped.
+
 ### 4.4 The shipped integrity floor today
 
 **Context.** §4.2 is not merged yet, so what actually protects the board right
@@ -542,7 +582,7 @@ noted). Constants that are _not_ env-tunable are listed for completeness.
 Client-side (`lib/leaderboard-client.js`) config lives in `config.json`, not env:
 `gamerTag`, `telemetryEnabled` (default `true`), `apiBaseUrl` (default
 `https://aiburn.dev`, scheme-allow-listed per §3.7), and `reportIntervalMs`
-(default hourly, floored at 60,000 ms).
+(default every 10 minutes, floored at 60,000 ms).
 
 ---
 

@@ -5,8 +5,10 @@
 
 ![Make It Rain in action](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/make-it-rain.gif)
 
-A menu bar app that tracks your Claude Code spend today. **Every $1 flies a 💵
-off the menu bar — and every $100 makes it rain.** 💸
+A menu bar app that makes your Claude Code spend impossible to ignore. **Every
+$1 flies a 💵 off the menu bar — and every $100 makes it rain.** 💸 Then it adds
+your day into a shared picture of what everyone is spending, and asks the only
+question that matters: was it worth building it?
 
 ## Install
 
@@ -35,23 +37,32 @@ it lives in the tooltip and menu.
 - A 💵 flies off the tray at every whole dollar. Money stacks burst at $10
   and $50, and every $100 plays a ~6-second full-screen money shower. The
   overlay is click-through and only exists while animating.
+- **See your wealth** in the tray: today's total broken into 💰/💵/🪙, plus
+  what it bought in plain terms — _≈ 2 burgers 🍔_, _≈ 10% of a trip to Greece
+  🏛️_ — and the nudge, _was it worth building it?_
 - A tray menu with today's total, token counts, animation previews, and the
-  leaderboard controls.
+  collective-board controls.
 - A daily update check: when a new version ships, an **⬆️ Update** item
   appears in the menu and installs it for you.
 
-## Daily leaderboard
+## Collective spend, not a scoreboard
 
-**See who made it rain hardest today at [aiburn.dev](https://aiburn.dev)** —
-an anonymous ranking that resets every day (UTC).
+**See what Claude Code costs — together — at [aiburn.dev](https://aiburn.dev).**
+A ranked "who spent the most" board quietly rewards spending more, which is the
+opposite of the point. So the board shows the **collective** curve instead: how
+much everyone spent today and _when_ the peaks and valleys hit, resetting every
+day (UTC). Your own total sits beside a tangible equivalence so the number means
+something.
 
-![The daily leaderboard](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/leaderboard.gif)
+![The collective spend board](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/leaderboard.gif)
 
-Once an hour the app reports two things: a random gamer tag generated on
+Every 10 minutes the app reports two things: a random gamer tag generated on
 first run (e.g. `TurboLlama7392`) and today's estimated total. Nothing else
-leaves your machine, and the server stores nothing but `tag → daily total`,
-pruned daily. Toggle it off with **Share on daily leaderboard** in the tray
-menu, or reroll your tag with **New random tag**.
+leaves your machine; the server keeps only per-tag daily totals plus an
+aggregate hourly curve, pruned daily. **View leaderboard…** opens your personal
+reflection page (`aiburn.dev/?tag=<yourTag>`) — your spend, your share of the
+collective, and what it adds up to. Toggle reporting off with **Share on daily
+leaderboard** in the tray menu, or reroll your tag with **New random tag**.
 
 Settings live in `config.json` under Electron's `userData` directory (e.g.
 `~/Library/Application Support/make-it-rain/` on macOS). You can also self-host
@@ -62,7 +73,7 @@ the backend — a zero-dependency [Bun](https://bun.sh) server under `server/`
 bun server/index.ts           # http://localhost:8787
 ```
 
-The leaderboard page itself is an [Astro](https://astro.build) static site in
+The board page itself is an [Astro](https://astro.build) static site in
 `web/` (`cd web && bun run build`), which the server serves from `web/dist`.
 
 ## How it works

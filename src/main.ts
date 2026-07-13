@@ -27,6 +27,7 @@ import { UsageMonitor } from './lib/usage-monitor';
 import type { Snapshot } from './lib/usage-monitor';
 import { Config } from './lib/config';
 import * as denominations from './lib/denominations';
+import * as equivalences from './lib/equivalences';
 import { LeaderboardClient } from './lib/leaderboard-client';
 import { History, RANGES, billCount } from './lib/history';
 import type { Range, RangeResult, DayEntry } from './lib/history';
@@ -153,6 +154,32 @@ function historyMenuItem(range: Range): MenuItemConstructorOptions {
   return { label, submenu };
 }
 
+/**
+ * The "See your wealth" submenu: the physical-money breakdown plus tangible
+ * equivalences ("≈ 2 burgers", "≈ 10% of a trip to Greece") that reframe the
+ * number as spend you can feel, not a score to beat.
+ */
+function wealthSubmenu(totalUSD: number): MenuItemConstructorOptions[] {
+  const items: MenuItemConstructorOptions[] = [
+    { label: denominations.format(totalUSD), enabled: false },
+    { type: 'separator' },
+    { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
+  ];
+  const treat = equivalences.treats(totalUSD);
+  const slice = equivalences.bigTicketFraction(totalUSD);
+  if (treat || slice) {
+    items.push({ type: 'separator' });
+    if (treat) {
+      items.push({ label: `≈ ${treat.text} ${treat.emoji}`, enabled: false });
+    }
+    if (slice) {
+      items.push({ label: `≈ ${slice.text} ${slice.emoji}`, enabled: false });
+    }
+    items.push({ label: 'Was it worth building it?', enabled: false });
+  }
+  return items;
+}
+
 function rebuildTrayMenu(): void {
   if (!tray) return;
   const s = latestSnapshot;
@@ -182,11 +209,7 @@ function rebuildTrayMenu(): void {
     { type: 'separator' },
     {
       label: 'See your wealth',
-      submenu: [
-        { label: denominations.format(s.totalCostUSD), enabled: false },
-        { type: 'separator' },
-        { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
-      ],
+      submenu: wealthSubmenu(s.totalCostUSD),
     },
     { label: 'Past spending', submenu: RANGES.map(historyMenuItem) }
   );
@@ -242,7 +265,12 @@ function openLeaderboardPage(): void {
   try {
     if (!leaderboard) return;
     const base = leaderboard.apiBaseUrl.replace(/\/+$/, '');
-    shell.openExternal(base + '/');
+    // Open the personal reflection view for this install's tag. The tag is
+    // already sanitized to [A-Za-z0-9_-] (leaderboard-client sanitizeTag) and
+    // apiBaseUrl is isSafeHttpUrl-guarded, so the URL handed to openExternal is
+    // safe; encodeURIComponent is belt-and-suspenders.
+    const tag = encodeURIComponent(leaderboard.gamerTag);
+    shell.openExternal(base + '/?tag=' + tag);
   } catch {
     /* ignore — opening the page is best-effort */
   }

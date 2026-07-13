@@ -8,6 +8,8 @@
  * Endpoints:
  *   POST /api/report        body { tag: string, total: number } -> { ok, total }
  *   GET  /api/leaderboard   -> { date, entries: [{ tag, total }] } (today only)
+ *   GET  /api/collective    -> { date, total, activeTags, hours: [{hour,spend}] }
+ *                              (+ ?tag=X adds you: { tag, total } for the personal view)
  *   GET  /api/stars         -> { stars: number|null } (GitHub stars, cached)
  *   GET  /                  -> static landing page (STATIC_DIR, see below)
  *   GET  /health            -> { ok: true }
@@ -34,13 +36,16 @@ const TAG_MAX_LENGTH = 32;
 const STARS_TTL_MS = 10 * 60 * 1000;
 const STARS_FETCH_TIMEOUT_MS = 4000;
 
-// Strict Content-Security-Policy for the leaderboard page. The page is a single
-// self-contained file with one inline <script> and inline <style>, so inline is
-// allowed, but every external/remote capability is denied — defense-in-depth on
-// top of output encoding + server-side tag sanitization.
+// Strict Content-Security-Policy for the leaderboard page. Styles are inlined and
+// the only scripts are the page's own same-origin bundle (Astro emits the hoisted
+// module as a /_astro/*.js file once it grows past the inline threshold) plus an
+// inline JSON-LD block — so 'self' + 'unsafe-inline' cover exactly our own code
+// while every remote/external capability stays denied. Same-origin scripts are as
+// trusted as inline ones here (the origin serves only our own static build + API),
+// and this is defense-in-depth on top of output encoding + tag sanitization.
 const CSP =
   "default-src 'none'; " +
-  "script-src 'unsafe-inline'; " +
+  "script-src 'self' 'unsafe-inline'; " +
   "style-src 'unsafe-inline'; " +
   "connect-src 'self'; " +
   "img-src 'self' data:; " +
@@ -344,6 +349,22 @@ export function createApp(config: AppConfig = {}): App {
         date: LeaderboardDB.today(),
         entries: db.leaderboard(),
       });
+    }
+    if (req.method === 'GET' && pathname === '/api/collective') {
+      const day = LeaderboardDB.today();
+      const body: Record<string, unknown> = {
+        date: day,
+        total: db.collectiveTotal(day),
+        activeTags: db.activeTags(day),
+        hours: db.hourlySeries(day),
+      };
+      // Personal view: ?tag=X echoes that tag's own total so the page can show
+      // "your share of the collective" even for tags outside the top-100 board.
+      const tag = sanitizeTag(url.searchParams.get('tag'));
+      if (tag) {
+        body.you = { tag, total: db.tagTotal(tag, day) };
+      }
+      return jsonResponse(200, body);
     }
     if (req.method === 'GET' && pathname === '/api/stars') {
       const stars = await getStarCount();

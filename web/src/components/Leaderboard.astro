@@ -1,32 +1,29 @@
 ---
-// Live daily leaderboard. Renders a shimmering skeleton (5 placeholder rows)
-// until the client fetches GET /api/leaderboard, then swaps in the real rows,
-// an empty state, or an error state (see lib/leaderboard.ts render/showError).
+// Today's contributors — a light, unranked "everyone raining today" list rather
+// than a podium of top spenders. Renders a shimmering skeleton until the client
+// fetches GET /api/leaderboard, then swaps in the real rows (tag + total), an
+// empty state, or an error state (see lib/leaderboard.ts renderBoard).
 ---
 
+<h2 class="board-h" id="boardHeading" hidden>Everyone raining today</h2>
 <section class="board skel" id="board" aria-live="polite" aria-busy="true">
   <div class="row">
-    <div class="rank"></div>
     <div class="bar w-tag"></div>
     <div class="bar w-amt"></div>
   </div>
   <div class="row">
-    <div class="rank"></div>
     <div class="bar w-tag"></div>
     <div class="bar w-amt"></div>
   </div>
   <div class="row">
-    <div class="rank"></div>
     <div class="bar w-tag"></div>
     <div class="bar w-amt"></div>
   </div>
   <div class="row">
-    <div class="rank"></div>
     <div class="bar w-tag"></div>
     <div class="bar w-amt"></div>
   </div>
   <div class="row">
-    <div class="rank"></div>
     <div class="bar w-tag"></div>
     <div class="bar w-amt"></div>
   </div>

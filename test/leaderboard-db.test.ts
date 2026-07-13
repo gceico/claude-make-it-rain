@@ -3,7 +3,9 @@
  *
  * Exercises the store directly (no HTTP): recursive dir creation, report/board
  * round-trip, max-total upsert, descending sort, the 100 cap + explicit limit,
- * per-day isolation, and old-day pruning. Uses an ephemeral temp DB file.
+ * per-day isolation, and old-day pruning. Also covers the collective-spend
+ * aggregate: hourly delta accumulation, the 24-bucket series, collectiveTotal /
+ * activeTags / tagTotal, and hourly pruning. Uses an ephemeral temp DB file.
  */
 
 import { test, expect, afterAll } from 'bun:test';
@@ -95,5 +97,60 @@ test('prunes days older than yesterday on a fresh report', () => {
   );
   db.report('FreshTag', 1, TODAY); // pruneOldDays keeps only today + yesterday
   expect(db.leaderboard(OLD_DAY).length).toBe(0);
+  db.close();
+});
+
+// ── Collective-spend aggregate ────────────────────────────────────────────────
+
+test('hourly buckets accumulate positive deltas; sum equals collectiveTotal', () => {
+  const day = '2001-03-03';
+  const db = new LeaderboardDB(dbPath);
+  const at = (h: number) => new Date(Date.UTC(2001, 2, 3, h));
+  db.report('A', 2, day, at(9)); // +2 in hour 9
+  db.report('A', 5, day, at(10)); // +3 in hour 10
+  db.report('A', 4, day, at(11)); // lower re-report -> +0, no double count
+  db.report('B', 3, day, at(10)); // +3 in hour 10
+
+  const series = db.hourlySeries(day);
+  expect(series.length).toBe(24);
+  expect(series[9]!.spend).toBe(2);
+  expect(series[10]!.spend).toBe(6);
+  expect(series[11]!.spend).toBe(0);
+
+  const sum = series.reduce((s, b) => s + b.spend, 0);
+  expect(sum).toBe(db.collectiveTotal(day));
+  expect(db.collectiveTotal(day)).toBe(8); // A=5, B=3
+  db.close();
+});
+
+test('hourlySeries returns 24 zero-filled buckets for an empty day', () => {
+  const db = new LeaderboardDB(dbPath);
+  const series = db.hourlySeries('1999-09-09');
+  expect(series.length).toBe(24);
+  expect(series.every((b, i) => b.hour === i && b.spend === 0)).toBe(true);
+  db.close();
+});
+
+test('collectiveTotal, activeTags and tagTotal report per-day aggregates', () => {
+  const day = '2001-04-04';
+  const db = new LeaderboardDB(dbPath);
+  db.report('One', 10, day);
+  db.report('Two', 25, day);
+  db.report('One', 40, day); // cumulative update, still one tag
+
+  expect(db.collectiveTotal(day)).toBe(65); // 40 + 25
+  expect(db.activeTags(day)).toBe(2);
+  expect(db.tagTotal('One', day)).toBe(40);
+  expect(db.tagTotal('Nobody', day)).toBe(0);
+  db.close();
+});
+
+test('prunes hourly buckets for days older than yesterday', () => {
+  const db = new LeaderboardDB(dbPath);
+  db.report('OldSpend', 30, OLD_DAY);
+  expect(db.collectiveTotal(OLD_DAY)).toBe(30);
+  db.report('TodaySpend', 1, TODAY); // triggers prune of old day
+  expect(db.hourlySeries(OLD_DAY).every((b) => b.spend === 0)).toBe(true);
+  expect(db.collectiveTotal(OLD_DAY)).toBe(0);
   db.close();
 });

@@ -15,8 +15,8 @@ interface Props {
 }
 
 const {
-  title = 'Make It Rain: Leaderboard of the Day',
-  description = "The daily leaderboard of who made it rain hardest on Claude Code. Anonymous tags, today's estimated spend, resets daily.",
+  title = 'Make It Rain: what Claude Code costs, together',
+  description = "See the collective spend on Claude Code today — an hourly curve of the community's estimated burn, plus your own total turned into something tangible. Awareness, not a ranking. Anonymous, resets daily.",
 } = Astro.props;
 
 // Canonical + absolute social URLs. Astro.site is set in astro.config
@@ -40,7 +40,7 @@ const jsonLd = {
       operatingSystem: 'macOS, Windows, Linux',
       url: SITE.origin,
       description:
-        "Make It Rain is an open-source menu-bar app that watches your Claude Code usage and shows the day's estimated spend. It flies a dollar bill across your screen for every dollar and rains money at $100 milestones, with an optional anonymous daily leaderboard.",
+        "Make It Rain is an open-source menu-bar app that watches your Claude Code usage and shows the day's estimated spend. It flies a dollar bill across your screen for every dollar and rains money at $100 milestones, and an optional anonymous board shows the community's collective spend as an hourly curve alongside tangible equivalences for your own total.",
       offers: {
         '@type': 'Offer',
         price: '0',

@@ -258,6 +258,44 @@ test('security headers (nosniff + JSON type + CSP on HTML)', async () => {
   const csp = page.headers.get('content-security-policy') || '';
   expect(csp).toBeTruthy();
   expect(/default-src 'none'/.test(csp)).toBe(true);
+  // Same-origin bundle + inline JSON-LD are allowed; remote scripts stay denied.
+  expect(/script-src 'self' 'unsafe-inline'/.test(csp)).toBe(true);
+});
+
+test('GET /api/collective returns date, total, activeTags and a 24-bucket series', async () => {
+  await request('POST', '/api/report', { tag: 'CollectiveOne', total: 12 });
+  await request('POST', '/api/report', { tag: 'CollectiveTwo', total: 8 });
+
+  const res = await request('GET', '/api/collective');
+  expect(res.status).toBe(200);
+  const data = JSON.parse(res.body);
+  expect(typeof data.date).toBe('string');
+  expect(typeof data.total).toBe('number');
+  expect(data.total).toBeGreaterThanOrEqual(20);
+  expect(typeof data.activeTags).toBe('number');
+  expect(Array.isArray(data.hours)).toBe(true);
+  expect(data.hours.length).toBe(24);
+  const sum = data.hours.reduce(
+    (s: number, h: { spend: number }) => s + h.spend,
+    0
+  );
+  expect(Math.round(sum * 100) / 100).toBe(Math.round(data.total * 100) / 100);
+  // No ?tag= -> no personal echo.
+  expect(data.you).toBeUndefined();
+});
+
+test('GET /api/collective?tag= echoes a sanitized personal total', async () => {
+  await request('POST', '/api/report', { tag: 'MeTag', total: 15 });
+  const res = await request(
+    'GET',
+    '/api/collective?tag=' + encodeURIComponent('<b>MeTag</b>')
+  );
+  expect(res.status).toBe(200);
+  const data = JSON.parse(res.body);
+  // Tag is sanitized server-side to [A-Za-z0-9_-] before lookup.
+  expect(data.you).toBeDefined();
+  expect(data.you.tag).toBe('bMeTagb');
+  expect(typeof data.you.total).toBe('number');
 });
 
 test('non-JSON report body is rejected with 400 invalid_json', async () => {

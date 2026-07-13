@@ -436,7 +436,7 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 }
 .row {
   display: grid;
-  grid-template-columns: 2.4rem 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: clamp(10px, 3vw, 16px);
   padding: 14px clamp(14px, 3.5vw, 20px);
@@ -446,15 +446,6 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   transition: transform .22s var(--ease-out), border-color .22s var(--ease-out), background .22s var(--ease-out);
 }
 .row:hover { transform: translateY(-1px); border-color: color-mix(in oklab, var(--accent) 40%, var(--line-solid)); }
-.row .rank {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--muted);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.row .rank .medal { font-size: 1.35rem; }
 .row .tag {
   font-weight: 650;
   font-size: clamp(0.98rem, 2.6vw, 1.08rem);
@@ -469,21 +460,6 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
-/* Champion: first place gets the gold treatment, no nested card. */
-.row.champ {
-  padding: 20px clamp(16px, 3.5vw, 24px);
-  background:
-    radial-gradient(120% 140% at 0% 0%, #ffd23f1f 0, transparent 55%),
-    color-mix(in oklab, var(--surface-2) 92%, transparent);
-  border-color: color-mix(in oklab, var(--gold) 44%, transparent);
-  box-shadow: 0 18px 48px -26px #ffd23f4d, inset 0 1px 0 0 #ffffff0f;
-}
-.row.champ .rank .medal { font-size: 1.7rem; filter: drop-shadow(0 2px 6px #d9a21266); }
-.row.champ .tag { font-size: clamp(1.1rem, 3.4vw, 1.35rem); font-weight: 750; }
-.row.champ .amt { font-size: clamp(1.25rem, 4vw, 1.6rem); color: var(--gold); text-shadow: 0 0 24px #ffd23f30; }
-.row.top2 .amt { color: var(--silver); }
-.row.top3 .amt { color: var(--bronze); }
 
 .state {
   text-align: center;
@@ -569,12 +545,145 @@ footer.site {
 .credit a { color: var(--muted-strong); font-weight: 600; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color .2s, color .2s; }
 .credit a:hover, .credit a:focus-visible { color: var(--accent); border-bottom-color: var(--accent); outline: none; }
 
+/* Collective equivalence line under the tally, e.g. "≈ a trip to Greece". */
+.collective-eq {
+  margin: 12px 0 0;
+  color: var(--gold);
+  font-weight: 650;
+  font-size: clamp(0.95rem, 2.6vw, 1.08rem);
+  text-wrap: balance;
+}
+.collective-eq:empty { display: none; }
+
+/* ── Collective-spend curve ────────────────────────────────────────────────── */
+.graph {
+  margin-top: clamp(26px, 5vh, 38px);
+  padding: clamp(16px, 3.5vw, 22px);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  border: 1px solid var(--line);
+}
+.graph[hidden] { display: none; }
+.graph-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.graph-title {
+  font-family: var(--display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: clamp(1.05rem, 3.2vw, 1.35rem);
+  color: var(--ink);
+}
+.graph-sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.graph-body { width: 100%; }
+.c-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.c-line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  filter: drop-shadow(0 4px 10px #35d07f40);
+  vector-effect: non-scaling-stroke;
+}
+.c-now { fill: var(--gold); stroke: var(--bg); stroke-width: 2; }
+.c-tick {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+/* ── Personal reflection panel (opened via ?tag=) ──────────────────────────── */
+.reflect {
+  margin-top: clamp(24px, 4vh, 34px);
+  padding: clamp(20px, 4vw, 30px);
+  border-radius: 18px;
+  text-align: center;
+  background:
+    radial-gradient(120% 140% at 50% 0%, #35d07f14 0, transparent 60%),
+    color-mix(in oklab, var(--surface-2) 92%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--line-solid));
+  box-shadow: 0 22px 60px -34px #35d07f4d, inset 0 1px 0 0 #ffffff0f;
+}
+.reflect[hidden] { display: none; }
+.reflect-eyebrow, .reflect-tag {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.reflect-amt {
+  margin: 6px 0 4px;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(2.6rem, 11vw, 4rem);
+  line-height: 0.94;
+  color: var(--accent);
+  text-shadow: 0 0 40px #35d07f42;
+}
+.reflect-list {
+  list-style: none;
+  margin: 16px auto 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 34ch;
+  text-align: left;
+}
+.reflect-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--muted-strong);
+  font-size: clamp(0.94rem, 2.5vw, 1.02rem);
+}
+.reflect-list b { color: var(--ink); font-weight: 700; }
+.reflect-list .re-emoji { flex: none; }
+.reflect-kicker {
+  margin: 18px 0 0;
+  font-family: var(--display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  font-size: clamp(1.2rem, 4.5vw, 1.8rem);
+  color: var(--gold);
+  text-shadow: 0 0 30px #ffd23f30;
+}
+.reflect-none { margin: 12px 0 0; color: var(--muted-strong); }
+
+/* Board section heading (light "everyone raining today" label). */
+.board-h {
+  margin: clamp(28px, 5vh, 40px) 0 0;
+  font-family: var(--display);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: clamp(1.1rem, 3.4vw, 1.5rem);
+  color: var(--ink);
+  text-align: center;
+}
+.board-h[hidden] { display: none; }
+.board-h + .board { margin-top: 14px; }
+
 /* Entrance choreography for board rows (enhances an already-rendered board). */
 .reveal { animation: rise .55s var(--ease-out) both; }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 @media (max-width: 420px) {
-  .row { grid-template-columns: 1.9rem 1fr auto; }
+  .row { grid-template-columns: 1fr auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

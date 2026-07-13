@@ -1,0 +1,15 @@
+---
+// Collective-spend curve: an hourly line/area chart of how much the whole
+// community spent through the day (UTC). The centerpiece of the reframed page —
+// it shows WHEN the world is spending (working-hour peaks, overnight valleys),
+// not who spent the most. Hidden until the client fetches GET /api/collective
+// and injects an inline SVG into #graphBody (see lib/leaderboard.ts buildChart).
+---
+
+<section class="graph" id="graph" aria-label="Collective spend through the day" hidden>
+  <div class="graph-head">
+    <span class="graph-title">When we spend</span>
+    <span class="graph-sub" id="graphSub"></span>
+  </div>
+  <div class="graph-body" id="graphBody"></div>
+</section>
