@@ -55,14 +55,14 @@ test('upsert keeps the MAX total (latest cumulative figure)', () => {
   db.close();
 });
 
-test('sorts high-to-low by total', () => {
+test('sorts alphabetically (A-Z, case-insensitive), not by amount', () => {
   const day = '2000-01-01'; // isolated day, no interference
   const db = new LeaderboardDB(dbPath);
-  db.report('Low', 1, day);
-  db.report('High', 100, day);
-  db.report('Mid', 50, day);
-  const totals = db.leaderboard(day).map((e) => e.total);
-  expect(totals).toEqual([100, 50, 1]);
+  db.report('charlie', 1, day);
+  db.report('Alpha', 100, day); // biggest spender, but not first
+  db.report('bravo', 50, day);
+  const tags = db.leaderboard(day).map((e) => e.tag);
+  expect(tags).toEqual(['Alpha', 'bravo', 'charlie']);
   db.close();
 });
 
@@ -72,8 +72,10 @@ test('caps the board at 100 by default and honors an explicit limit', () => {
   for (let i = 0; i < 150; i++) db.report('tag' + i, i + 1, day);
   const board = db.leaderboard(day);
   expect(board.length).toBe(100);
-  expect(board[0]!.total).toBe(150);
-  expect(board[99]!.total).toBe(51);
+  // Alphabetical order holds within the returned page (all-lowercase ASCII, so
+  // a plain code-unit sort matches SQLite's COLLATE NOCASE ordering).
+  const tags = board.map((e) => e.tag);
+  expect([...tags].sort()).toEqual(tags);
   expect(db.leaderboard(day, 5).length).toBe(5);
   db.close();
 });

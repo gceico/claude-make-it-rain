@@ -99,8 +99,10 @@ export class LeaderboardDB {
     this.getStmt = this.db.query(
       'SELECT total FROM leaderboard WHERE day = ? AND tag = ?;'
     );
+    // Alphabetical (A–Z, case-insensitive), NOT by amount: the board is a flat
+    // "everyone raining today" list, not a spend ranking. LIMIT is a safety bound.
     this.boardStmt = this.db.query(
-      'SELECT tag, total FROM leaderboard WHERE day = ? ORDER BY total DESC LIMIT ?;'
+      'SELECT tag, total FROM leaderboard WHERE day = ? ORDER BY tag COLLATE NOCASE ASC LIMIT ?;'
     );
     this.pruneStmt = this.db.query(
       'DELETE FROM leaderboard WHERE day NOT IN (?, ?);'
@@ -154,7 +156,7 @@ export class LeaderboardDB {
     return row ? row.total : total;
   }
 
-  /** Today's leaderboard, sorted high-to-low, capped at `limit`. */
+  /** Today's contributors, sorted alphabetically (A–Z), capped at `limit`. */
   leaderboard(
     day: string = LeaderboardDB.today(),
     limit = 100
