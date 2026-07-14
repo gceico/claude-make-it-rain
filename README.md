@@ -54,7 +54,7 @@ much everyone spent today and _when_ the peaks and valleys hit, resetting every
 day (UTC). Your own total sits beside a tangible equivalence so the number means
 something.
 
-![The collective spend board](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/leaderboard.gif)
+![The collective spend board](collective-spend.png)
 
 Every 10 minutes the app reports two things: a random gamer tag generated on
 first run (e.g. `TurboLlama7392`) and today's estimated total. Nothing else
