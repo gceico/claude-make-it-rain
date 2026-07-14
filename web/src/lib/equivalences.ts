@@ -76,28 +76,52 @@ function clampUSD(totalUSD?: number | null): number {
     : 0;
 }
 
-export function treats(totalUSD?: number | null): TreatMatch | null {
+/** Days since the Unix epoch in the caller's LOCAL timezone (rotation seed). */
+export function localDayIndex(now: Date = new Date()): number {
+  return Math.floor(
+    (now.getTime() - now.getTimezoneOffset() * 60000) / 86400000
+  );
+}
+
+/** Pick from a non-empty pool: rotate by `dayIndex` when given, else index 0. */
+function rotate<T>(pool: T[], dayIndex?: number | null): T {
+  if (typeof dayIndex === 'number' && isFinite(dayIndex) && pool.length > 1) {
+    return pool[
+      ((Math.trunc(dayIndex) % pool.length) + pool.length) % pool.length
+    ]!;
+  }
+  return pool[0]!;
+}
+
+export function treats(
+  totalUSD?: number | null,
+  dayIndex?: number | null
+): TreatMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
   const affordable = SMALL_TREATS.filter((t) => usd >= t.unitUSD);
   const pool = affordable.length > 0 ? affordable : [SMALL_TREATS[0]!];
 
-  let best = pool[0]!;
-  let bestCount = Math.max(1, Math.round(usd / best.unitUSD));
-  let bestScore = Infinity;
-  for (const t of pool) {
-    const count = Math.max(1, Math.round(usd / t.unitUSD));
-    const score = Math.abs(count - TREAT_TARGET_COUNT);
-    if (
-      score < bestScore ||
-      (score === bestScore && t.unitUSD > best.unitUSD)
-    ) {
-      best = t;
-      bestCount = count;
-      bestScore = score;
+  let best: Treat;
+  if (typeof dayIndex === 'number' && isFinite(dayIndex)) {
+    best = rotate(pool, dayIndex);
+  } else {
+    best = pool[0]!;
+    let bestScore = Infinity;
+    for (const t of pool) {
+      const count = Math.max(1, Math.round(usd / t.unitUSD));
+      const score = Math.abs(count - TREAT_TARGET_COUNT);
+      if (
+        score < bestScore ||
+        (score === bestScore && t.unitUSD > best.unitUSD)
+      ) {
+        best = t;
+        bestScore = score;
+      }
     }
   }
+  const bestCount = Math.max(1, Math.round(usd / best.unitUSD));
   const label = bestCount === 1 ? best.singular : best.plural;
   return {
     count: bestCount,
@@ -115,14 +139,17 @@ function pct(ratio: number): string {
 }
 
 export function bigTicketFraction(
-  totalUSD?: number | null
+  totalUSD?: number | null,
+  dayIndex?: number | null
 ): BigTicketMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
+  const fractional = BIG_TICKETS.filter((b) => b.unitUSD > usd);
   const reference =
-    BIG_TICKETS.find((b) => b.unitUSD > usd) ??
-    BIG_TICKETS[BIG_TICKETS.length - 1]!;
+    fractional.length > 0
+      ? rotate(fractional, dayIndex)
+      : BIG_TICKETS[BIG_TICKETS.length - 1]!;
   const name = `${reference.article} ${reference.label}`;
   if (usd >= reference.unitUSD) {
     const times = Math.round((usd / reference.unitUSD) * 10) / 10;
@@ -135,16 +162,15 @@ export function bigTicketFraction(
 }
 
 export function bigTicketReached(
-  totalUSD?: number | null
+  totalUSD?: number | null,
+  dayIndex?: number | null
 ): BigTicketMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
-  let reached: BigTicket | null = null;
-  for (const b of BIG_TICKETS) {
-    if (usd >= b.unitUSD) reached = b;
-  }
-  if (!reached) return bigTicketFraction(usd);
+  const reachedPool = BIG_TICKETS.filter((b) => usd >= b.unitUSD).reverse();
+  if (reachedPool.length === 0) return bigTicketFraction(usd, dayIndex);
+  const reached = rotate(reachedPool, dayIndex);
 
   const name = `${reached.article} ${reached.label}`;
   const times = usd / reached.unitUSD;

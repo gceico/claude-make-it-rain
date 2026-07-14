@@ -6,6 +6,7 @@ import {
   treats,
   bigTicketFraction,
   bigTicketReached,
+  localDayIndex,
   SMALL_TREATS,
   BIG_TICKETS,
 } from '../src/lib/equivalences';
@@ -86,4 +87,49 @@ test('bigTicketReached falls back to a fraction below the smallest big item', ()
   const r = bigTicketReached(50); // below the cheapest big-ticket
   assert.ok(r);
   assert.ok(/%\sof\s/.test(r!.text));
+});
+
+// ── Daily rotation: passing a dayIndex cycles the featured item ──────────────
+test('localDayIndex is a stable whole number for a fixed date', () => {
+  const d = new Date('2026-07-14T09:00:00Z');
+  assert.strictEqual(localDayIndex(d), Math.floor(localDayIndex(d)));
+  assert.strictEqual(localDayIndex(d), localDayIndex(d)); // deterministic
+});
+
+test('treats rotates the featured item across days and stays consistent per day', () => {
+  // $200 can afford several treats, so rotation has room to move.
+  const seen = new Set<string>();
+  for (let day = 0; day < SMALL_TREATS.length * 2; day++) {
+    const t = treats(200, day);
+    assert.ok(t);
+    seen.add(t!.label);
+    assert.strictEqual(treats(200, day)!.label, t!.label); // same day → same item
+  }
+  assert.ok(seen.size > 1, 'expected more than one distinct item across days');
+});
+
+test('treats without a dayIndex keeps deterministic best-fit behavior', () => {
+  assert.strictEqual(treats(24)!.text, treats(24)!.text);
+  assert.strictEqual(treats(24, undefined)!.text, treats(24)!.text);
+});
+
+test('bigTicketFraction rotates the reference across days', () => {
+  const seen = new Set<string>();
+  for (let day = 0; day < BIG_TICKETS.length * 2; day++) {
+    const f = bigTicketFraction(10, day); // below every big-ticket → all candidates
+    assert.ok(f);
+    seen.add(f!.text);
+  }
+  assert.ok(seen.size > 1);
+});
+
+test('bigTicketReached rotates among reached items, each still truthful', () => {
+  const total = BIG_TICKETS[2]!.unitUSD + 10; // reaches the first three items
+  const seen = new Set<string>();
+  for (let day = 0; day < 6; day++) {
+    const r = bigTicketReached(total, day);
+    assert.ok(r);
+    seen.add(r!.text);
+  }
+  assert.ok(seen.size > 1);
 });

@@ -14,7 +14,12 @@
  * gracefully so a missing or slow backend never breaks the page.
  */
 
-import { treats, bigTicketFraction, bigTicketReached } from './equivalences';
+import {
+  treats,
+  bigTicketFraction,
+  bigTicketReached,
+  localDayIndex,
+} from './equivalences';
 
 // ── API contract (mirrors server) ────────────────────────────────────────────
 export interface LeaderboardEntry {
@@ -234,7 +239,7 @@ function renderCollective(data: CollectiveData): void {
 
   const eqEl = byId('collectiveEq');
   if (eqEl) {
-    const big = bigTicketReached(total);
+    const big = bigTicketReached(total, localDayIndex());
     eqEl.textContent = big ? `Together, that's ≈ ${big.text} ${big.emoji}` : '';
   }
 
@@ -277,8 +282,9 @@ function renderReflection(
     return;
   }
 
-  const treat = treats(yours);
-  const slice = bigTicketFraction(yours);
+  const day = localDayIndex();
+  const treat = treats(yours, day);
+  const slice = bigTicketFraction(yours, day);
   const share =
     collectiveTotal > 0
       ? Math.max(0.1, Math.round((yours / collectiveTotal) * 1000) / 10)
