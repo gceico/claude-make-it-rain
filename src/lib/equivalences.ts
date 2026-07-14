@@ -103,12 +103,41 @@ function clampUSD(totalUSD?: number | null): number {
 }
 
 /**
+ * Days since the Unix epoch in the caller's LOCAL timezone. Passed as the
+ * `dayIndex` seed to the matchers below so the featured item rotates once per
+ * calendar day (a burger today, a pizza tomorrow) instead of always landing on
+ * the same "best fit". Defaults to the current local day.
+ */
+export function localDayIndex(now: Date = new Date()): number {
+  return Math.floor(
+    (now.getTime() - now.getTimezoneOffset() * 60000) / 86400000
+  );
+}
+
+/** Pick from a non-empty pool: rotate by `dayIndex` when given, else index 0. */
+function rotate<T>(pool: T[], dayIndex?: number | null): T {
+  if (typeof dayIndex === 'number' && isFinite(dayIndex) && pool.length > 1) {
+    return pool[
+      ((Math.trunc(dayIndex) % pool.length) + pool.length) % pool.length
+    ]!;
+  }
+  return pool[0]!;
+}
+
+/**
  * Match an individual total to the treat that yields the most natural small
  * count (nearest to ~3, tie-broken toward the pricier item so counts stay low).
  * Returns null for a zero/invalid total so callers can show their own "nothing
  * yet" copy.
+ *
+ * Pass `dayIndex` (see {@link localDayIndex}) to rotate the featured item once
+ * per day across everything the total can afford, instead of always showing the
+ * same best-fit item. Omit it to keep the deterministic best-fit behavior.
  */
-export function treats(totalUSD?: number | null): TreatMatch | null {
+export function treats(
+  totalUSD?: number | null,
+  dayIndex?: number | null
+): TreatMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
@@ -118,21 +147,27 @@ export function treats(totalUSD?: number | null): TreatMatch | null {
   const affordable = SMALL_TREATS.filter((t) => usd >= t.unitUSD);
   const pool = affordable.length > 0 ? affordable : [SMALL_TREATS[0]!];
 
-  let best = pool[0]!;
-  let bestCount = Math.max(1, Math.round(usd / best.unitUSD));
-  let bestScore = Infinity;
-  for (const t of pool) {
-    const count = Math.max(1, Math.round(usd / t.unitUSD));
-    const score = Math.abs(count - TREAT_TARGET_COUNT);
-    if (
-      score < bestScore ||
-      (score === bestScore && t.unitUSD > best.unitUSD)
-    ) {
-      best = t;
-      bestCount = count;
-      bestScore = score;
+  let best: Treat;
+  if (typeof dayIndex === 'number' && isFinite(dayIndex)) {
+    // Rotate through the affordable items so the pick changes each day.
+    best = rotate(pool, dayIndex);
+  } else {
+    // Deterministic: the item whose count lands nearest the natural target.
+    best = pool[0]!;
+    let bestScore = Infinity;
+    for (const t of pool) {
+      const count = Math.max(1, Math.round(usd / t.unitUSD));
+      const score = Math.abs(count - TREAT_TARGET_COUNT);
+      if (
+        score < bestScore ||
+        (score === bestScore && t.unitUSD > best.unitUSD)
+      ) {
+        best = t;
+        bestScore = score;
+      }
     }
   }
+  const bestCount = Math.max(1, Math.round(usd / best.unitUSD));
   const label = bestCount === 1 ? best.singular : best.plural;
   return {
     count: bestCount,
@@ -155,16 +190,24 @@ function pct(ratio: number): string {
  * "≈ 10% of a trip to Greece". Picks the smallest big-ticket the total does NOT
  * exceed (so the percentage is meaningful and < 100%); if the total dwarfs every
  * item, expresses it as a multiple of the largest ("3× the Titanic").
+ *
+ * Pass `dayIndex` (see {@link localDayIndex}) to rotate the reference item once
+ * per day across every big-ticket the total hasn't exceeded, so the framing
+ * stays fresh. Omit it to keep the deterministic smallest-fit behavior.
  */
 export function bigTicketFraction(
-  totalUSD?: number | null
+  totalUSD?: number | null,
+  dayIndex?: number | null
 ): BigTicketMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
+  // Candidates the total reads as a fraction of (< 100%), smallest-first.
+  const fractional = BIG_TICKETS.filter((b) => b.unitUSD > usd);
   const reference =
-    BIG_TICKETS.find((b) => b.unitUSD > usd) ??
-    BIG_TICKETS[BIG_TICKETS.length - 1]!;
+    fractional.length > 0
+      ? rotate(fractional, dayIndex)
+      : BIG_TICKETS[BIG_TICKETS.length - 1]!;
   const name = `${reference.article} ${reference.label}`;
   if (usd >= reference.unitUSD) {
     const times = Math.round((usd / reference.unitUSD) * 10) / 10;
@@ -181,18 +224,22 @@ export function bigTicketFraction(
  * community headline: "≈ a trip to Greece" or "≈ 3× a trip to Greece". Picks the
  * largest big-ticket the total reaches; falls back to a fractional framing when
  * the total is below even the smallest item.
+ *
+ * Pass `dayIndex` (see {@link localDayIndex}) to rotate the headline item once
+ * per day across every big-ticket the total has reached (each is still true —
+ * the total does add up to that many of it). Omit it to keep naming the largest.
  */
 export function bigTicketReached(
-  totalUSD?: number | null
+  totalUSD?: number | null,
+  dayIndex?: number | null
 ): BigTicketMatch | null {
   const usd = clampUSD(totalUSD);
   if (usd <= 0) return null;
 
-  let reached: BigTicket | null = null;
-  for (const b of BIG_TICKETS) {
-    if (usd >= b.unitUSD) reached = b;
-  }
-  if (!reached) return bigTicketFraction(usd);
+  // Every item the total reaches, largest-first so index 0 is the default pick.
+  const reachedPool = BIG_TICKETS.filter((b) => usd >= b.unitUSD).reverse();
+  if (reachedPool.length === 0) return bigTicketFraction(usd, dayIndex);
+  const reached = rotate(reachedPool, dayIndex);
 
   const name = `${reached.article} ${reached.label}`;
   const times = usd / reached.unitUSD;

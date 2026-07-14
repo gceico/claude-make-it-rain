@@ -165,8 +165,10 @@ function wealthSubmenu(totalUSD: number): MenuItemConstructorOptions[] {
     { type: 'separator' },
     { label: '💰 = $100   💵 = $1   🪙 = 1¢', enabled: false },
   ];
-  const treat = equivalences.treats(totalUSD);
-  const slice = equivalences.bigTicketFraction(totalUSD);
+  // Rotate the featured items once per day so the reflection stays fresh.
+  const day = equivalences.localDayIndex();
+  const treat = equivalences.treats(totalUSD, day);
+  const slice = equivalences.bigTicketFraction(totalUSD, day);
   if (treat || slice) {
     items.push({ type: 'separator' });
     if (treat) {
@@ -208,7 +210,7 @@ function rebuildTrayMenu(): void {
     },
     { type: 'separator' },
     {
-      label: 'See your wealth',
+      label: 'See your numbers',
       submenu: wealthSubmenu(s.totalCostUSD),
     },
     { label: 'Past spending', submenu: RANGES.map(historyMenuItem) }
@@ -218,9 +220,9 @@ function rebuildTrayMenu(): void {
     const lb = leaderboard;
     template.push(
       { type: 'separator' },
-      { label: `Leaderboard tag: ${lb.gamerTag}`, enabled: false },
+      { label: `User tag: ${lb.gamerTag}`, enabled: false },
       {
-        label: 'Share on daily leaderboard',
+        label: 'Share on collective spend',
         type: 'checkbox',
         checked: lb.telemetryEnabled,
         click: (item: MenuItem) => {
@@ -236,7 +238,7 @@ function rebuildTrayMenu(): void {
           rebuildTrayMenu();
         },
       },
-      { label: 'View leaderboard…', click: () => openLeaderboardPage() }
+      { label: "View everyone's spend…", click: () => openLeaderboardPage() }
     );
   }
 
