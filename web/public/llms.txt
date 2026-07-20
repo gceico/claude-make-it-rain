@@ -1,0 +1,36 @@
+# Make It Rain (aiburn.dev)
+
+> Make It Rain is a menu-bar/tray app that turns Claude Code spend into a
+> visible, physical thing: a 💵 flies off the tray every dollar, and every
+> $100 makes it rain on screen. It also reports an anonymized daily total to
+> this site, which shows the collective spend of everyone running the app as
+> an hourly curve — not a leaderboard or ranking — paired with tangible
+> equivalences (e.g. "≈ 2 burgers", "≈ 10% of a trip to Greece").
+
+This page (aiburn.dev) is the public collective-spend board for the Make It
+Rain app. It shows total spend across all opted-in users today, resetting at
+UTC midnight, plus a personal reflection view for any user via `?tag=<tag>`.
+
+## Key facts
+
+- The npm package is `@gceico/claude-make-it-rain`; install with
+  `npm install -g @gceico/claude-make-it-rain` then run `claude-make-it-rain`.
+- Reporting is anonymized: a random gamer tag (e.g. `TurboLlama7392`)
+  generated on first run, plus a daily USD total. No other data leaves the
+  user's machine.
+- The board intentionally does not rank users by spend — ranking would
+  reward spending more, the opposite of the app's point. It only shows the
+  aggregate curve and each user's own total against the collective.
+- Dollar figures are estimates from Claude API list pricing, not actual
+  bills.
+- The app, board backend, and this site are all open source.
+
+## Docs
+
+- [GitHub repository](https://github.com/gceico/claude-make-it-rain)
+- [README](https://github.com/gceico/claude-make-it-rain/blob/main/README.md)
+- [npm package](https://www.npmjs.com/package/@gceico/claude-make-it-rain)
+
+## Author
+
+Built by Gabriel Ceicoschi ([Aibl.to](https://aibl.to/)).
