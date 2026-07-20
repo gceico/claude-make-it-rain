@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <title>Make It Rain overlay</title>
 <style>
+  @property --burn {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: 0%;
+  }
   html, body {
     margin: 0;
     padding: 0;
@@ -18,7 +23,7 @@
     position: absolute;
     top: 0;
     left: 0;
-    will-change: transform, opacity;
+    will-change: transform, opacity, mask, -webkit-mask;
     line-height: 1;
   }
   /* A "money stack": several bills layered with slight offsets/rotation so
@@ -57,15 +62,39 @@
   }
 
   // Animates any element falling from (x,y) by (dx,dy) while rotating, then
-  // cleans it up. Shared by single emoji and composed money stacks.
-  function animateFalling(el, { x, y, dx, dy, rotation, duration, fade }) {
+  // burning up (bottom-up dissolve with a charred ember glow) in the last
+  // ~30% of the animation, then cleans it up. Shared by single emoji and
+  // composed money stacks — the mask erodes the whole element uniformly so
+  // it works whether `el` is a lone 💵 or a layered `.stack` wad.
+  function animateFalling(el, { x, y, dx, dy, rotation, duration }) {
     el.style.transform = `translate(${x}px, ${y}px)`;
+    el.style.setProperty('--burn', '0%');
+    const maskImage =
+      'linear-gradient(to top, transparent var(--burn), rgba(0,0,0,0.15) calc(var(--burn) + 8%), #000 calc(var(--burn) + 20%))';
+    el.style.setProperty('-webkit-mask-image', maskImage);
+    el.style.setProperty('mask-image', maskImage);
     document.body.appendChild(el);
     animationStarted();
 
     const keyframes = [
-      { transform: `translate(${x}px, ${y}px) rotate(0rad)`, opacity: 1 },
-      { transform: `translate(${x + dx}px, ${y + dy}px) rotate(${rotation}rad)`, opacity: fade ? 0 : 1 },
+      {
+        transform: `translate(${x}px, ${y}px) rotate(0rad)`,
+        '--burn': '0%',
+        offset: 0,
+      },
+      {
+        transform: `translate(${x + dx}px, ${y + dy}px) rotate(${rotation}rad)`,
+        '--burn': '0%',
+        filter: 'none',
+        offset: 0.7,
+      },
+      {
+        transform: `translate(${x + dx}px, ${y + dy - 6}px) rotate(${rotation}rad) scale(0.96)`,
+        '--burn': '120%',
+        filter:
+          'drop-shadow(0 0 6px rgba(255,120,0,0.85)) drop-shadow(0 2px 4px rgba(120,40,0,0.6)) brightness(0.8) sepia(0.4) saturate(2)',
+        offset: 1,
+      },
     ];
     const anim = el.animate(keyframes, {
       duration: duration * 1000,
@@ -133,7 +162,6 @@
           dy: rand(150, 250),
           rotation: rand(-0.6, 0.6),
           duration: 1.8,
-          fade: true,
         });
       }, i * 120);
     }
@@ -158,7 +186,6 @@
           dy: rand(220, 380),
           rotation: rand(-1.2, 1.2),
           duration: rand(1.8, 2.6),
-          fade: true,
         });
       }, s * 220);
     }
@@ -229,14 +256,17 @@
     for (let i = 0; i < 60; i++) {
       setTimeout(() => {
         const size = rand(20, 48);
+        const y = -size * 1.5;
         const motion = {
           x: rand(0, Math.max(1, W - size)),
-          y: -size * 1.5,
+          y,
           dx: rand(-80, 80),
-          dy: H + size * 3,
+          // Land the fall just inside the bottom edge — the last ~30% of the
+          // animation is the burn, so bills dissolve on-screen near the
+          // floor instead of off the bottom of the window.
+          dy: (H - y) - rand(size, size * 3),
           rotation: rand(-3, 3),
           duration: rand(2.5, 5),
-          fade: false,
         };
         // Sprinkle in some fat money stacks amongst the single emoji.
         if (Math.random() < 0.2) {
