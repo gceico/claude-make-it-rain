@@ -54,3 +54,16 @@ export function crossedHundred(
     newTotal >= 100
   );
 }
+
+/**
+ * Savings-side mirror of the three crossing functions above, applied to the
+ * running `savings.lifetimeUSD` total (see analytics-store.ts) instead of
+ * today's spend. Kept as thin wrappers (rather than duplicated logic) so the
+ * green "save" choreography — dollar-up flies, save-stacks, and a green
+ * "savings rain" — shares exactly the same crossing rules as the red spend
+ * side: midnight-free (savings is a running lifetime total, so it only ever
+ * grows), highest-only on a multi-cross update, and a >=100 guard on the rain.
+ */
+export const savingsCrossed = dollarsCrossed;
+export const savingsStackCountForCrossing = stackCountForCrossing;
+export const savingsCrossedHundred = crossedHundred;

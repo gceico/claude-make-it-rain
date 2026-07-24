@@ -7,6 +7,9 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+// fly-bills/stack/rain payloads all carry an optional `variant: 'spend' |
+// 'save'` field (added for the Optimize release's green savings visuals) —
+// the bridge passes payloads through untouched, so no channel changes here.
 contextBridge.exposeInMainWorld('bridge', {
   onFlyBills: (fn: (payload: unknown) => void) =>
     ipcRenderer.on('fly-bills', (_e, payload) => fn(payload)),

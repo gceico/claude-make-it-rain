@@ -504,6 +504,110 @@ test('midnight rollover with no new spend emits a zeroed onUpdate', () => {
   );
 });
 
+// ── Live habit signals: userTurns, sessions, sessionGaps ────────────────────
+// The monitor accumulates the raw signals the 4 content/session detectors need
+// (giant-paste, rage-retry, long-sessions, stale-cache-idle). Verify both the
+// accumulation AND that the detectors fire when fed the live snapshot.
+test('accumulates userTurns / sessions / sessionGaps and detectors fire live', async () => {
+  const { runHabitDetectors } = await import('../src/lib/habits');
+  const pd = path.join(tmpRoot, 'projects-habits', 'proj');
+  fs.mkdirSync(pd, { recursive: true });
+
+  const t0 = now.getTime();
+  const iso = (offsetMs: number) => new Date(t0 + offsetMs).toISOString();
+  const assistant = (
+    sessionId: string,
+    tsOffset: number,
+    reqId: string,
+    input: number,
+    cacheRead: number,
+    cacheCreate: number
+  ) =>
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: iso(tsOffset),
+      requestId: reqId,
+      sessionId,
+      message: {
+        id: reqId + 'm',
+        model: 'claude-sonnet-5',
+        usage: {
+          input_tokens: input,
+          output_tokens: 0,
+          cache_read_input_tokens: cacheRead,
+          cache_creation_input_tokens: cacheCreate,
+        },
+      },
+    });
+  const userLine = (sessionId: string, tsOffset: number, text: string) =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: iso(tsOffset),
+      sessionId,
+      message: { content: text },
+    });
+
+  fs.writeFileSync(
+    path.join(pd, 's.jsonl'),
+    [
+      // giant paste (>20k chars) in session s1
+      userLine('s1', -600_000, 'x'.repeat(25_000)),
+      // long session: >150k context (input + cache read) in s1
+      assistant('s1', -590_000, 'a1', 160_000, 20_000, 5_000),
+      // >5min gap within s1 followed by a cache-creation spike (stale-cache-idle)
+      assistant('s1', -100_000, 'a2', 100, 0, 30_000),
+      // second distinct session for sessions.count == 2
+      assistant('s2', -50_000, 'a3', 500, 0, 0),
+      // rage-retry: 3 similar-sized user turns close together in s2
+      userLine('s2', -40_000, 'y'.repeat(300)),
+      userLine('s2', -39_000, 'y'.repeat(305)),
+      userLine('s2', -38_000, 'y'.repeat(298)),
+    ].join('\n') + '\n'
+  );
+
+  const m = new UsageMonitor({
+    projectsDir: path.join(tmpRoot, 'projects-habits'),
+  });
+  m.tick(true);
+  const snap = m.snapshot;
+
+  assert.strictEqual(snap.userTurns.length, 4, 'all user turns recorded');
+  assert.strictEqual(snap.sessions.count, 2, 'two distinct sessions');
+  assert.ok(
+    snap.sessions.maxContextTokens >= 150_000,
+    `peak context tracked, got ${snap.sessions.maxContextTokens}`
+  );
+  assert.strictEqual(
+    snap.sessionGaps.length,
+    1,
+    'one >5min gap+rebuild recorded'
+  );
+  assert.strictEqual(snap.sessionGaps[0]!.cacheCreationTokensAfterGap, 30_000);
+
+  // Feed the live snapshot through the detectors (mirrors main.ts buildHabitInput).
+  const results = runHabitDetectors({
+    snapshot: {
+      costUSD: snap.totalCostUSD,
+      perModel: {},
+      cache: { readTok: 0, creationTok: 0, hitRatio: 0 },
+      sessions: { ...snap.sessions },
+      habitCounts: {},
+    },
+    toolingState: {
+      rtk: { installed: true, version: null, detectedAtMs: 0 },
+      caveman: { installed: true, version: null, detectedAtMs: 0 },
+      ponytail: { installed: true, version: null, detectedAtMs: 0 },
+    },
+    userTurns: snap.userTurns,
+    sessionGaps: snap.sessionGaps,
+  });
+  const fired = new Set(results.filter((r) => r.triggered).map((r) => r.id));
+  assert.ok(fired.has('giant-paste'), 'giant-paste fires live');
+  assert.ok(fired.has('rage-retry'), 'rage-retry fires live');
+  assert.ok(fired.has('long-sessions'), 'long-sessions fires live');
+  assert.ok(fired.has('stale-cache-idle'), 'stale-cache-idle fires live');
+});
+
 afterAll(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

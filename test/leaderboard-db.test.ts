@@ -41,7 +41,9 @@ test('creates parent dir recursively + report/leaderboard round-trip', () => {
   const stored = db.report('TurboLlama7392', 12.34);
   expect(stored).toBe(12.34);
 
-  expect(db.leaderboard()).toEqual([{ tag: 'TurboLlama7392', total: 12.34 }]);
+  expect(db.leaderboard()).toEqual([
+    { tag: 'TurboLlama7392', total: 12.34, saved: 0, optimized: false },
+  ]);
   db.close();
 });
 
@@ -147,6 +149,67 @@ test('collectiveTotal, activeTags and tagTotal report per-day aggregates', () =>
   db.close();
 });
 
+// ── savedUSD: the ONE Optimize-release telemetry addition ──────────────────
+
+test('report(): savedUSD is a latest-wins per-(day,tag) snapshot, not MAX', () => {
+  const day = '2002-05-05';
+  const db = new LeaderboardDB(dbPath);
+  db.report('SaverOne', 10, day, new Date(), 2.5);
+  db.report('SaverTwo', 20, day, new Date(), 1.5);
+  expect(db.collectiveSavedTotal(day)).toBe(4);
+
+  // Re-reporting takes the LATEST value — a lower figure overwrites (so a stale
+  // one-off spike can't pin the day). SaverOne 2.5 -> 1.0, total 4 -> 2.5.
+  db.report('SaverOne', 15, day, new Date(), 1.0);
+  expect(db.collectiveSavedTotal(day)).toBe(2.5);
+
+  // A higher value likewise just replaces. SaverOne 1.0 -> 5, total -> 6.5.
+  db.report('SaverOne', 16, day, new Date(), 5);
+  expect(db.collectiveSavedTotal(day)).toBe(6.5);
+  db.close();
+});
+
+test('report(): omitting/invalid savedUSD never records anything (back-compatible)', () => {
+  const day = '2002-06-06';
+  const db = new LeaderboardDB(dbPath);
+  db.report('NoSavings', 10, day);
+  expect(db.collectiveSavedTotal(day)).toBe(0);
+  db.report('BadSavings', 5, day, new Date(), -1);
+  expect(db.collectiveSavedTotal(day)).toBe(0);
+  db.close();
+});
+
+test('collectiveSavedTotal for an empty day is 0', () => {
+  const db = new LeaderboardDB(dbPath);
+  expect(db.collectiveSavedTotal('1998-08-08')).toBe(0);
+  db.close();
+});
+
+test('leaderboard() surfaces per-tag saved + optimized; optimized sticks once true', () => {
+  const day = '2002-07-07';
+  const db = new LeaderboardDB(dbPath);
+  // optimized true with 0 saved (tools just installed) still records the flag.
+  db.report('OptTag', 10, day, new Date(), 0, true);
+  db.report('PlainTag', 5, day, new Date(), 2.5, false);
+
+  const board = db.leaderboard(day);
+  const opt = board.find((e) => e.tag === 'OptTag');
+  const plain = board.find((e) => e.tag === 'PlainTag');
+  expect(opt).toEqual({ tag: 'OptTag', total: 10, saved: 0, optimized: true });
+  expect(plain).toEqual({
+    tag: 'PlainTag',
+    total: 5,
+    saved: 2.5,
+    optimized: false,
+  });
+
+  // A later report without the flag must not clear an already-true optimized.
+  db.report('OptTag', 12, day, new Date(), 1);
+  const opt2 = db.leaderboard(day).find((e) => e.tag === 'OptTag');
+  expect(opt2).toEqual({ tag: 'OptTag', total: 12, saved: 1, optimized: true });
+  db.close();
+});
+
 test('prunes hourly buckets for days older than yesterday', () => {
   const db = new LeaderboardDB(dbPath);
   db.report('OldSpend', 30, OLD_DAY);
@@ -154,5 +217,14 @@ test('prunes hourly buckets for days older than yesterday', () => {
   db.report('TodaySpend', 1, TODAY); // triggers prune of old day
   expect(db.hourlySeries(OLD_DAY).every((b) => b.spend === 0)).toBe(true);
   expect(db.collectiveTotal(OLD_DAY)).toBe(0);
+  db.close();
+});
+
+test('prunes savings for days older than yesterday', () => {
+  const db = new LeaderboardDB(dbPath);
+  db.report('OldSaver', 30, OLD_DAY, new Date(), 5);
+  expect(db.collectiveSavedTotal(OLD_DAY)).toBe(5);
+  db.report('TodaySaver', 1, TODAY, new Date(), 1); // triggers prune of old day
+  expect(db.collectiveSavedTotal(OLD_DAY)).toBe(0);
   db.close();
 });

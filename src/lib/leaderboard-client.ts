@@ -270,6 +270,17 @@ export function ensureConfig(configDir: string): LeaderboardConfig {
 export interface LeaderboardClientOptions {
   configDir?: string;
   getTotal?: () => number;
+  /**
+   * Optional: today's/lifetime net-savings figure (analytics-store.ts's
+   * savings.lifetimeUSD) to report as the ONE additional telemetry field for
+   * the Optimize release (see docs/DECISIONS.md §3.1's documented exception).
+   * Omitted -> 0, so installs that never wire this in still report the same
+   * shape they always have (tag, total, savedUSD: 0).
+   */
+  getSavedUSD?: () => number;
+  /** Whether the user has all Optimize tools installed — surfaces a ⚡ badge on
+   *  the board. Anonymous single bool; no tool names/versions leave the machine. */
+  getOptimized?: () => boolean;
   fetchImpl?: FetchLike | null;
   onConfigChange?: (config: LeaderboardConfig) => void;
   /**
@@ -284,6 +295,8 @@ export interface LeaderboardClientOptions {
 export class LeaderboardClient {
   configDir: string;
   getTotal: () => number;
+  getSavedUSD: () => number;
+  getOptimized: () => boolean;
   fetchImpl: FetchLike | null;
   onConfigChange: ((config: LeaderboardConfig) => void) | null;
   timer: NodeJS.Timeout | null;
@@ -294,12 +307,18 @@ export class LeaderboardClient {
   constructor({
     configDir,
     getTotal,
+    getSavedUSD,
+    getOptimized,
     fetchImpl,
     onConfigChange,
     apiBaseUrlOverride,
   }: LeaderboardClientOptions = {}) {
     this.configDir = configDir || defaultConfigDir();
     this.getTotal = typeof getTotal === 'function' ? getTotal : () => 0;
+    this.getSavedUSD =
+      typeof getSavedUSD === 'function' ? getSavedUSD : () => 0;
+    this.getOptimized =
+      typeof getOptimized === 'function' ? getOptimized : () => false;
     // An explicit `null` means "no network" (see reportNow) and must be
     // honored; only a missing (undefined) fetchImpl falls back to global fetch.
     // A `||` fallback would treat null as falsy and silently go live.
@@ -396,11 +415,27 @@ export class LeaderboardClient {
       if (typeof total !== 'number' || !isFinite(total) || total < 0) total = 0;
       total = Math.round(total * 100) / 100;
 
+      // The ONE additional field this release adds to the payload (see
+      // docs/DECISIONS.md §3.1's documented exception) — same
+      // minimal/anonymous shape otherwise: tag + numbers, nothing else.
+      let savedUSD = this.getSavedUSD();
+      if (typeof savedUSD !== 'number' || !isFinite(savedUSD) || savedUSD < 0)
+        savedUSD = 0;
+      savedUSD = Math.round(savedUSD * 100) / 100;
+
+      // Single anonymous bool: does this user run the full Optimize toolchain.
+      const optimized = this.getOptimized() === true;
+
       const url = this.apiBaseUrl.replace(/\/+$/, '') + '/api/report';
       const res = await this.fetchImpl(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tag: this.config.gamerTag, total }),
+        body: JSON.stringify({
+          tag: this.config.gamerTag,
+          total,
+          savedUSD,
+          optimized,
+        }),
         signal: controller ? controller.signal : undefined,
       });
       const ok = !!(res && res.ok);

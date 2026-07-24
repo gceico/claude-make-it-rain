@@ -11,17 +11,20 @@
     <code>npm install -g @gceico/claude-make-it-rain</code>
     <span class="copy" aria-hidden="true">Copy</span>
   </button>
-  <button class="cmd" type="button" data-copy="claude-make-it-rain">
-    <span class="prompt" aria-hidden="true">$</span>
-    <code>claude-make-it-rain</code>
-    <span class="copy" aria-hidden="true">Copy</span>
-  </button>
+  <p class="run-note">
+    then run
+    <button class="run-cmd" type="button" data-copy="claude-make-it-rain">
+      claude-make-it-rain
+    </button>
+  </p>
 </section>
 
 <script>
-  // Click-to-copy for the two install commands. Fail-silent: browsers without
+  // Click-to-copy for both commands. Fail-silent: browsers without
   // navigator.clipboard (or when permission is denied) just do nothing.
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('.install .cmd')) {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    '.install [data-copy]'
+  )) {
     btn.addEventListener('click', async () => {
       const text = btn.dataset.copy;
       if (!text || !navigator.clipboard) return;

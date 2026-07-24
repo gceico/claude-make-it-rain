@@ -371,11 +371,39 @@ test('client reporting (payload minimalism, disable, fail-silent)', async () => 
   const body = JSON.parse(captured!.opts.body);
   assert.deepStrictEqual(
     Object.keys(body).sort(),
-    ['tag', 'total'],
-    'body ONLY has tag+total (no PII)'
+    ['optimized', 'savedUSD', 'tag', 'total'],
+    'body has ONLY tag+total+savedUSD+optimized (the Optimize-release additions, no PII)'
   );
   assert.strictEqual(body.total, 12.35, 'total rounded to cents');
   assert.strictEqual(body.tag, c1.gamerTag);
+  assert.strictEqual(
+    body.savedUSD,
+    0,
+    'savedUSD defaults to 0 when not wired in'
+  );
+  assert.strictEqual(
+    body.optimized,
+    false,
+    'optimized defaults to false when not wired in'
+  );
+
+  // getSavedUSD wired in: reported, rounded to cents, clamped >= 0.
+  let capturedSaved: { opts: { body: string } } | null = null;
+  const c1b = new LeaderboardClient({
+    configDir: path.join(tmpRoot, 'report-saved'),
+    getTotal: () => 5,
+    getSavedUSD: () => 3.14159,
+    fetchImpl: async (_url: string, opts: unknown) => {
+      capturedSaved = { opts: opts as { body: string } };
+      return { ok: true, status: 200 };
+    },
+  });
+  await c1b.reportNow();
+  assert.strictEqual(
+    JSON.parse(capturedSaved!.opts.body).savedUSD,
+    3.14,
+    'savedUSD rounded to cents'
+  );
 
   // Disabled: short-circuits, never calls fetch.
   let called = false;

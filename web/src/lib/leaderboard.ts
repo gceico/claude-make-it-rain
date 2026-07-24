@@ -25,6 +25,10 @@ import {
 export interface LeaderboardEntry {
   tag: string;
   total: number;
+  /** This tag's net savings for the day (0 / absent when none). */
+  saved?: number;
+  /** True when the tag runs the full Optimize toolchain. */
+  optimized?: boolean;
 }
 
 export interface LeaderboardData {
@@ -41,8 +45,9 @@ export interface CollectiveData {
   date: string;
   total: number;
   activeTags: number;
+  savedTotal?: number;
   hours: HourBucket[];
-  you?: { tag: string; total: number };
+  you?: { tag: string; total: number; saved?: number };
 }
 
 export interface StarsData {
@@ -105,7 +110,7 @@ function seedRain(): void {
   const rain = byId('rain');
   if (!rain) return;
   const glyphs = ['💵', '💸', '💰', '🤑', '💴'];
-  const N = window.innerWidth < 560 ? 9 : 15;
+  const N = window.innerWidth < 560 ? 6 : 10;
   const frag = document.createDocumentFragment();
   for (let i = 0; i < N; i++) {
     const b = document.createElement('span');
@@ -113,8 +118,8 @@ function seedRain(): void {
     b.textContent = glyphs[i % glyphs.length];
     const depth = Math.random(); // 0 = far/small/faint, 1 = near
     b.style.left = Math.random() * 100 + 'vw';
-    b.style.fontSize = (14 + depth * 30).toFixed(0) + 'px';
-    b.style.setProperty('--o', (0.1 + depth * 0.28).toFixed(2));
+    b.style.fontSize = (13 + depth * 23).toFixed(0) + 'px';
+    b.style.setProperty('--o', (0.06 + depth * 0.16).toFixed(2));
     b.style.setProperty(
       '--drift',
       (-40 + Math.random() * 80).toFixed(0) + 'px'
@@ -234,13 +239,24 @@ function renderCollective(data: CollectiveData): void {
   const tallyCount = byId('tallyCount');
   if (tallyCount) tallyCount.textContent = count.toLocaleString('en-US');
   const tallyNoun = byId('tallyNoun');
-  if (tallyNoun) tallyNoun.textContent = count === 1 ? 'builder' : 'builders';
+  // Leading space is intentional: Astro's HTML compression strips the
+  // whitespace text node between <b> and this span, so "6builders" otherwise.
+  if (tallyNoun) tallyNoun.textContent = count === 1 ? ' builder' : ' builders';
   byId('tally')?.classList.add('show');
 
-  const eqEl = byId('collectiveEq');
-  if (eqEl) {
+  const metaEl = byId('collectiveMeta');
+  if (metaEl) {
+    const parts: string[] = [];
     const big = bigTicketReached(total, localDayIndex());
-    eqEl.textContent = big ? `Together, that's ≈ ${big.text} ${big.emoji}` : '';
+    if (big) parts.push('≈ ' + esc(big.text));
+    const saved =
+      typeof data.savedTotal === 'number' && isFinite(data.savedTotal)
+        ? data.savedTotal
+        : 0;
+    if (saved > 0) {
+      parts.push('<span class="meta-saved">' + money(saved) + ' saved</span>');
+    }
+    metaEl.innerHTML = parts.join(' · ');
   }
 
   // Graph.
@@ -249,7 +265,9 @@ function renderCollective(data: CollectiveData): void {
   const sub = byId('graphSub');
   if (graph && body) {
     const hours = Array.isArray(data.hours) ? data.hours : [];
-    if (total > 0 && hours.length) {
+    // Need ≥2 points: buildChart's x-scale divides by (n-1), so a lone bucket
+    // would produce NaN path coords and a blank chart.
+    if (total > 0 && hours.length > 1) {
       body.innerHTML = buildChart(hours);
       if (sub) sub.textContent = peakSummary(hours);
       graph.hidden = false;
@@ -263,7 +281,7 @@ function renderCollective(data: CollectiveData): void {
 
 /** Personal reflection panel, shown only when the page is opened with ?tag=. */
 function renderReflection(
-  you: { tag: string; total: number },
+  you: { tag: string; total: number; saved?: number },
   collectiveTotal: number
 ): void {
   const panel = byId('reflect');
@@ -277,7 +295,7 @@ function renderReflection(
       esc(you.tag) +
       '</p>' +
       '<p class="reflect-none">No spend logged under this tag today. ' +
-      'Nothing to answer for — yet. ☔️</p>';
+      'Nothing to answer for — yet.</p>';
     panel.hidden = false;
     return;
   }
@@ -291,32 +309,31 @@ function renderReflection(
       : 0;
 
   const lines: string[] = [];
-  lines.push('<p class="reflect-eyebrow">your day, ' + esc(you.tag) + '</p>');
+  lines.push(
+    '<p class="reflect-eyebrow">Your day, <span class="reflect-name">' +
+      esc(you.tag) +
+      '</span></p>'
+  );
   lines.push('<p class="reflect-amt">' + money(yours) + '</p>');
   const items: string[] = [];
-  if (treat) {
-    items.push(
-      '<li><span class="re-emoji">' +
-        treat.emoji +
-        "</span> that's about <b>" +
-        esc(treat.text) +
-        '</b> — gone</li>'
-    );
-  }
-  if (slice) {
-    items.push(
-      '<li><span class="re-emoji">' +
-        slice.emoji +
-        '</span> ≈ <b>' +
-        esc(slice.text) +
-        '</b></li>'
-    );
+  const eqParts: string[] = [];
+  if (treat) eqParts.push('<b>' + esc(treat.text) + '</b>');
+  if (slice) eqParts.push('<b>' + esc(slice.text) + '</b>');
+  if (eqParts.length) {
+    items.push('<li>≈ ' + eqParts.join(' · ') + '</li>');
   }
   if (share > 0) {
     items.push(
-      '<li><span class="re-emoji">🌧️</span> <b>' +
-        share +
-        '%</b> of everything the community spent today</li>'
+      '<li><b>' + share + '%</b> of everything the community spent today</li>'
+    );
+  }
+  const saved =
+    typeof you.saved === 'number' && isFinite(you.saved) && you.saved > 0
+      ? you.saved
+      : 0;
+  if (saved) {
+    items.push(
+      '<li><b>' + money(saved) + '</b> saved today with Optimize</li>'
     );
   }
   lines.push('<ul class="reflect-list">' + items.join('') + '</ul>');
@@ -345,6 +362,14 @@ function loadCollective(): void {
 
 // ── Contributor list ("everyone raining today", not a podium) ─────────────────
 function rowHTML(e: LeaderboardEntry): string {
+  const saved =
+    typeof e.saved === 'number' && isFinite(e.saved) && e.saved > 0
+      ? e.saved
+      : 0;
+  // One quiet sub-line under the amount: how much this tag saved today.
+  const savedLine = saved
+    ? '<span class="saved">' + money(saved) + ' saved</span>'
+    : '';
   return (
     '<div class="row">' +
     '<div class="tag">' +
@@ -352,6 +377,7 @@ function rowHTML(e: LeaderboardEntry): string {
     '</div>' +
     '<div class="amt">' +
     money(e.total) +
+    savedLine +
     '</div>' +
     '</div>'
   );
@@ -363,9 +389,11 @@ function renderBoard(data: LeaderboardData): void {
   board.classList.remove('skel');
   board.removeAttribute('aria-busy');
 
+  // "Everyone raining today" — a $0.00 tag isn't raining, so keep the list
+  // truthful and drop zero/blank totals (all-zero falls through to empty state).
   const entries = (data.entries || []).filter(
     (e): e is LeaderboardEntry =>
-      !!e && typeof e.total === 'number' && isFinite(e.total)
+      !!e && typeof e.total === 'number' && isFinite(e.total) && e.total > 0
   );
 
   const heading = byId('boardHeading');
@@ -373,7 +401,6 @@ function renderBoard(data: LeaderboardData): void {
     if (heading) heading.hidden = true;
     board.innerHTML =
       '<div class="state">' +
-      '<span class="big">☔️</span>' +
       '<span class="lead">No one is raining yet today.</span><br>' +
       'Fire up Claude Code and start the drizzle.' +
       '</div>';
@@ -401,7 +428,6 @@ function showBoardError(): void {
   if (heading) heading.hidden = true;
   board.innerHTML =
     '<div class="state">' +
-    '<span class="big">🌥️</span>' +
     '<span class="lead">Couldn\'t load the board.</span><br>' +
     'Give it a moment and refresh.' +
     '</div>';

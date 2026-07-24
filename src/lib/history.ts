@@ -5,6 +5,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { costForEntry } from './pricing';
 import { parseUsageEntry } from './entry-parser';
+import { AnalyticsStore, emptyDailySnapshot } from './analytics-store';
+import type { DailySnapshot, ToolingState } from './analytics-store';
+import { runHabitDetectors } from './habits';
 
 /**
  * Retroactive spend history built directly from the ~/.claude/projects/**\/*.jsonl
@@ -23,10 +26,23 @@ export interface Range {
   label: string;
 }
 
+/** Per-model cost/token accumulation within a DayBucket. */
+export interface DayBucketModel {
+  costUSD: number;
+  inTok: number;
+  outTok: number;
+}
+
 /** Accumulated cost for one local calendar day. */
 export interface DayBucket {
   costUSD: number;
   entryCount: number;
+  perModel: Record<string, DayBucketModel>;
+  cacheReadTok: number;
+  cacheCreationTok: number;
+  /** sessionId -> max input+cache tokens seen in one assistant entry of that
+   *  session, on this day — a proxy for that session's peak context size. */
+  sessionMaxContext: Map<string, number>;
 }
 
 /** A per-day entry in an assembled range result. */
@@ -117,6 +133,14 @@ export function billCount(costUSD: number): number {
   return Math.max(0, Math.floor(costUSD / 100));
 }
 
+/** A single 💰 with a count prefix per $100 (e.g. `10×💰`) instead of a long
+ *  unreadable trail of pouches. Empty string below $100. */
+export function billStacksLabel(costUSD: number): string {
+  const n = billCount(costUSD);
+  if (n <= 0) return '';
+  return `${n}×💰`;
+}
+
 /** All *.jsonl under projectsDir/<project>/ last modified at/after `since`.
  * A file whose mtime predates the window cannot contain in-window entries, so
  * skipping it is a safe optimization; per-entry timestamps still gate results. */
@@ -185,9 +209,18 @@ async function scanWindow({
 }: ScanWindowArgs): Promise<ScanResult> {
   const files = await discoverFiles(projectsDir, new Date(startMs));
   const seen = new Set<string>();
-  const days = new Map<string, DayBucket>(); // dayKey -> { costUSD, entryCount }
+  const days = new Map<string, DayBucket>(); // dayKey -> DayBucket
   let totalCostUSD = 0;
   let entryCount = 0;
+
+  const emptyBucket = (): DayBucket => ({
+    costUSD: 0,
+    entryCount: 0,
+    perModel: {},
+    cacheReadTok: 0,
+    cacheCreationTok: 0,
+    sessionMaxContext: new Map(),
+  });
 
   for (const file of files) {
     let content: string;
@@ -199,7 +232,7 @@ async function scanWindow({
     for (const line of content.split('\n')) {
       if (!line) continue;
       const parsed = parseUsageEntry(line);
-      if (!parsed) continue;
+      if (!parsed || parsed.kind !== 'assistant') continue;
 
       const t = parsed.timestamp.getTime();
       if (t < startMs || t >= endMs) continue;
@@ -210,9 +243,33 @@ async function scanWindow({
 
       const cost = costForEntry(parsed.usage, parsed.model);
       const key = dayKey(parsed.timestamp);
-      const bucket = days.get(key) || { costUSD: 0, entryCount: 0 };
+      const bucket = days.get(key) || emptyBucket();
       bucket.costUSD += cost;
       bucket.entryCount += 1;
+
+      const modelKey = parsed.model || 'unknown';
+      const modelBucket = bucket.perModel[modelKey] || {
+        costUSD: 0,
+        inTok: 0,
+        outTok: 0,
+      };
+      modelBucket.costUSD += cost;
+      modelBucket.inTok += parsed.inputTokens;
+      modelBucket.outTok += parsed.outputTokens;
+      bucket.perModel[modelKey] = modelBucket;
+
+      bucket.cacheReadTok += parsed.usage.cacheReadInputTokens;
+      bucket.cacheCreationTok += parsed.usage.cacheCreationInputTokens;
+
+      if (parsed.sessionId) {
+        const contextTokens =
+          parsed.inputTokens + parsed.usage.cacheReadInputTokens;
+        const prevMax = bucket.sessionMaxContext.get(parsed.sessionId) || 0;
+        if (contextTokens > prevMax) {
+          bucket.sessionMaxContext.set(parsed.sessionId, contextTokens);
+        }
+      }
+
       days.set(key, bucket);
 
       totalCostUSD += cost;
@@ -232,6 +289,55 @@ function daysArray(dayMap: Map<string, DayBucket>): DayEntry[] {
       entryCount: v.entryCount,
     }))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// All-installed tooling for the historical habit pass: tool-missing is a
+// current fact, not a per-day-historical one, so it must not inflate stored
+// habitCounts (today's live pass reports real tool state).
+const ALL_TOOLS_INSTALLED: ToolingState = {
+  rtk: { installed: true, version: null, detectedAtMs: 0 },
+  caveman: { installed: true, version: null, detectedAtMs: 0 },
+  ponytail: { installed: true, version: null, detectedAtMs: 0 },
+};
+
+/** Converts one scan's DayBucket into the analytics-store's persisted
+ *  DailySnapshot shape, including per-day habitCounts derived from that day's
+ *  token/model/cache/session data (content-shape habits like giant-paste need
+ *  user-turn data the history scan doesn't retain, so they stay 0 in history
+ *  and are only counted live). */
+function dailySnapshotFromBucket(bucket: DayBucket): DailySnapshot {
+  const snap = emptyDailySnapshot();
+  snap.costUSD = bucket.costUSD;
+  for (const [model, m] of Object.entries(bucket.perModel)) {
+    snap.perModel[model] = {
+      costUSD: m.costUSD,
+      inTok: m.inTok,
+      outTok: m.outTok,
+    };
+  }
+  const totalCacheTok = bucket.cacheReadTok + bucket.cacheCreationTok;
+  snap.cache = {
+    readTok: bucket.cacheReadTok,
+    creationTok: bucket.cacheCreationTok,
+    hitRatio: totalCacheTok > 0 ? bucket.cacheReadTok / totalCacheTok : 0,
+  };
+  let maxContext = 0;
+  for (const v of bucket.sessionMaxContext.values()) {
+    if (v > maxContext) maxContext = v;
+  }
+  snap.sessions = {
+    count: bucket.sessionMaxContext.size,
+    maxContextTokens: maxContext,
+  };
+  for (const r of runHabitDetectors({
+    snapshot: snap,
+    toolingState: ALL_TOOLS_INSTALLED,
+    userTurns: [],
+    sessionGaps: [],
+  })) {
+    if (r.count > 0) snap.habitCounts[r.id] = r.count;
+  }
+  return snap;
 }
 
 interface ScanRangeArgs {
@@ -289,6 +395,12 @@ interface TodayEntry {
 export interface HistoryOptions {
   projectsDir?: string;
   cacheTtlMs?: number;
+  /** Optional analytics store to persist finished (immutable) ledger days
+   *  into, so daily snapshots survive relaunch and past months even if
+   *  Claude prunes the underlying logs. Writing happens once per ledger
+   *  build (see _getLedger), the cheap correct path since the ledger is
+   *  itself only rebuilt once per local day. */
+  analyticsStore?: AnalyticsStore | null;
 }
 
 /**
@@ -316,14 +428,20 @@ export class History {
   _cache: Map<string, CacheEntry>;
   _ledger: LedgerEntry | null;
   _today: TodayEntry | null;
+  _analyticsStore: AnalyticsStore | null;
 
-  constructor({ projectsDir, cacheTtlMs = 60_000 }: HistoryOptions = {}) {
+  constructor({
+    projectsDir,
+    cacheTtlMs = 60_000,
+    analyticsStore = null,
+  }: HistoryOptions = {}) {
     this.projectsDir =
       projectsDir || path.join(os.homedir(), '.claude', 'projects');
     this.cacheTtlMs = cacheTtlMs;
     this._cache = new Map(); // rangeId -> { at, dayStartMs, promise }
     this._ledger = null; // { promise, dayStartMs, startMs }
     this._today = null; // { promise, at, dayStartMs }
+    this._analyticsStore = analyticsStore;
   }
 
   /** Earliest window start any selectable range can ask for. */
@@ -347,11 +465,35 @@ export class History {
       projectsDir: this.projectsDir,
       startMs,
       endMs: dayStartMs,
-    }).catch((err) => {
-      // Don't cache failures.
-      if (this._ledger && this._ledger.promise === promise) this._ledger = null;
-      throw err;
-    });
+    })
+      .then((result) => {
+        // Cheap, correct write path: every finished (immutable) day the ledger
+        // just scanned gets persisted into analytics-store, so daily snapshots
+        // survive relaunch and outlive any log pruning. Best-effort — a store
+        // write failure must never break the (already-completed) history scan.
+        if (this._analyticsStore) {
+          try {
+            this._analyticsStore.setDays(
+              [...result.days].map(
+                ([day, bucket]) =>
+                  [day, dailySnapshotFromBucket(bucket)] as [
+                    string,
+                    DailySnapshot,
+                  ]
+              )
+            );
+          } catch {
+            /* best-effort persistence */
+          }
+        }
+        return result;
+      })
+      .catch((err) => {
+        // Don't cache failures.
+        if (this._ledger && this._ledger.promise === promise)
+          this._ledger = null;
+        throw err;
+      });
     this._ledger = { promise, dayStartMs, startMs };
     return promise;
   }

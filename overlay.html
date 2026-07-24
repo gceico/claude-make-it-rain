@@ -33,6 +33,22 @@
     line-height: 1;
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
   }
+  /* Bills always keep their natural green 💵 — spend vs save is conveyed by a
+     small corner badge, NOT by recoloring the whole glyph (a full hue-rotate
+     read pink/ugly). Keep only a subtle drop-shadow. */
+  .variant-spend, .variant-save {
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+  }
+  /* Small corner badge on a bill/stack: 🔻 for spend (natively red = correct),
+     💚 for save (natively green everywhere — no CSS hue-rotate, which only
+     worked here and rendered inconsistently across emoji fonts). Badge only. */
+  .badge {
+    position: absolute;
+    right: -0.15em;
+    bottom: -0.1em;
+    line-height: 1;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -78,11 +94,25 @@
     };
   }
 
-  function spawnEmoji({ symbol, size, ...motion }) {
+  // Small corner badge span: 🔻 (spend, red) / 💚 (save, green), ~40% bill size.
+  function makeBadge(variant, size) {
+    const b = document.createElement('span');
+    b.className = 'badge';
+    b.textContent = variant === 'save' ? '💚' : '🔻';
+    b.style.fontSize = (size * 0.4) + 'px';
+    return b;
+  }
+
+  // variant: 'spend' | 'save' — bill is always green 💵; `badge` adds the
+  // small corner triangle that signals direction.
+  function spawnEmoji({ symbol, size, variant, badge, ...motion }) {
     const el = document.createElement('div');
-    el.className = 'emoji';
-    el.textContent = symbol;
+    el.className = 'emoji ' + (variant === 'save' ? 'variant-save' : 'variant-spend');
     el.style.fontSize = size + 'px';
+    const bill = document.createElement('span');
+    bill.textContent = symbol;
+    el.appendChild(bill);
+    if (badge) el.appendChild(makeBadge(variant, size));
     animateFalling(el, motion);
   }
 
@@ -95,9 +125,9 @@
   // With 10 layers the per-layer offset/rotation is much smaller than the old
   // 4-layer fan, so the wad still reads as ONE thick stack and keeps roughly
   // the same overall footprint.
-  function makeStack(size, layers = BILLS_PER_STACK) {
+  function makeStack(size, layers = BILLS_PER_STACK, variant) {
     const el = document.createElement('div');
-    el.className = 'emoji stack';
+    el.className = 'emoji stack ' + (variant === 'save' ? 'variant-save' : 'variant-spend');
     el.style.width = size + 'px';
     el.style.height = size + 'px';
     for (let i = 0; i < layers; i++) {
@@ -113,19 +143,25 @@
     return el;
   }
 
-  function spawnStack({ size, billsPerStack, ...motion }) {
-    animateFalling(makeStack(size, billsPerStack), motion);
+  // `badge` adds the small direction triangle next to the stack (spend/save).
+  function spawnStack({ size, billsPerStack, variant, badge, ...motion }) {
+    const el = makeStack(size, billsPerStack, variant);
+    if (badge) el.appendChild(makeBadge(variant, size * 0.6));
+    animateFalling(el, motion);
   }
 
   const rand = (min, max) => min + Math.random() * (max - min);
 
-  // Dollar-fly: bills dropping away from the tray item, staggered ~120ms apart.
-  function flyBills({ count, anchor }) {
+  // Dollar-fly: green 💵 dropping from the tray item with a small corner badge
+  // (🔻 spend / 💚 save), staggered ~120ms apart.
+  function flyBills({ count, anchor, variant }) {
     const capped = Math.max(0, Math.min(count, 10));
     for (let i = 0; i < capped; i++) {
       setTimeout(() => {
         spawnEmoji({
           symbol: '💵',
+          variant,
+          badge: true,
           size: 28,
           x: anchor.x + anchor.width / 2 - 14 + rand(-6, 6),
           y: anchor.y + anchor.height,
@@ -144,7 +180,9 @@
   // so hitting a milestone feels like a genuine payout rather than a lone 💵.
   // Stacks are staggered so several read as an escalating celebration
   // (count=1 for $10, count=5 for $50; $100 gets the full-screen rain).
-  function moneyStacks({ count, anchor }) {
+  // variant: 'spend' (default, red down-stack) | 'save' (green savings
+  // stack — see the $10/$50/$100 down-then-up choreography wired in main.ts).
+  function moneyStacks({ count, anchor, variant }) {
     const stacks = Math.max(1, Math.min(count || 1, 5));
     const cx = anchor ? anchor.x + anchor.width / 2 - 24 : window.innerWidth / 2;
     const cy = anchor ? anchor.y + anchor.height : 60;
@@ -152,6 +190,8 @@
       setTimeout(() => {
         spawnStack({
           size: rand(40, 52),
+          variant,
+          badge: true,
           x: cx + rand(-30, 30),
           y: cy,
           dx: rand(-160, 160),
@@ -208,8 +248,10 @@
     }
   }
 
-  // $100 celebration: full-screen shower of money emoji for ~6s.
-  const RAIN_EMOJI = ['💵', '💸', '💰', '🤑'];
+  // $100 celebration: full-screen shower of dollar bills for ~6s. Every bill is
+  // the same green 💵 carrying a directional badge — 🔻 for a spend rain, green
+  // 💚 for the savings rain — so a $100 milestone reads as "100 dollars gone",
+  // and its savings closer as "and here's what came back". No mixed glyphs.
   let raining = false;
 
   function rain(payload) {
@@ -217,6 +259,8 @@
     if (raining) return;
     raining = true;
     setTimeout(() => { raining = false; }, 6000);
+
+    const variant = payload && payload.variant === 'save' ? 'save' : 'spend';
 
     // With one overlay per display, main tells only the primary display to
     // play the shimmer ({sound: true}) so it isn't layered once per screen.
@@ -238,12 +282,8 @@
           duration: rand(2.5, 5),
           fade: false,
         };
-        // Sprinkle in some fat money stacks amongst the single emoji.
-        if (Math.random() < 0.2) {
-          spawnStack({ size: size * 1.1, ...motion });
-        } else {
-          spawnEmoji({ symbol: RAIN_EMOJI[Math.floor(Math.random() * RAIN_EMOJI.length)], size, ...motion });
-        }
+        // Every raindrop is a badged 💵 — uniform bills, direction via badge.
+        spawnEmoji({ symbol: '💵', variant, badge: true, size, ...motion });
       }, rand(0, 1500));
     }
   }

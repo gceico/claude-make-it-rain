@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import tailwindcss from '@tailwindcss/vite';
 
 // Static site. The build output (web/dist) is served same-origin by the
 // leaderboard backend, so all runtime API calls use relative URLs
@@ -20,5 +21,8 @@ export default defineConfig({
     // (script-src/style-src 'unsafe-inline', no 'self' needed) and makes zero
     // extra asset requests beyond the same-origin favicon.
     inlineStylesheets: 'always',
+  },
+  vite: {
+    plugins: [tailwindcss()],
   },
 });

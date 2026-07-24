@@ -282,6 +282,37 @@ justified by full disclosure + one-click off + anonymity.
 
 **Status.** Shipped.
 
+**2026-07 update — the documented exception (Optimize release).** The
+"Optimize" release (tooling install + habit/awareness features, see
+`src/lib/analytics-store.ts`, `habits.ts`, `score.ts`, `tooling.ts`) adds
+**two** new fields to the telemetry payload, both anonymous numbers/booleans
+next to the tag (`{ tag, total, savedUSD, optimized }`):
+
+- `savedUSD` — an anonymized net-savings figure for **today** (matches the
+  board's per-day spend; `getSavedUSD` = `daySavings(today).total`), rounded to
+  cents. Lifetime savings stay local.
+- `optimized` — a single boolean: whether the user runs the full Optimize
+  toolchain (all of RTK/Caveman/Ponytail installed; `getOptimized`). It is a
+  bare on/off flag — **no tool names or versions** leave the machine.
+
+Like `total`, both are just an anonymous number/flag beside the tag: no model
+names, no project names, no prompt content, no habit data ever leaves the
+machine. The server (`server/db.ts`) stores them in the `savings(day, tag,
+saved, optimized)` table (one row per tag per day: `saved` is latest-value-wins,
+`optimized` sticks true once set, pruned identically). Exposure:
+
+- `GET /api/collective` exposes the **aggregate** collective saved
+  (`savedTotal`), never a per-tag figure — matching §4.4's
+  collective-not-ranking philosophy.
+- `GET /api/leaderboard` entries now also carry each tag's own `saved` amount
+  and `optimized` flag (`{ tag, total, saved, optimized }`). This is a
+  deliberate, user-approved relaxation: the board stays **alphabetical, not
+  ranked** (§4.4), the tag is anonymous, and the extra fields celebrate the
+  Optimize win (a ⚡ badge + "💚 $X saved" per row) rather than shame spend.
+
+Omitting or sending an invalid `savedUSD`/`optimized` never rejects the report
+(back-compatible with older clients that don't send them yet).
+
 ### 3.2 Server does not log or persist IPs / request metadata
 
 **Context.** The privacy promise in §3.1 has to hold on the server too.

@@ -6,12 +6,55 @@ import * as os from 'os';
 import { costForEntry } from './pricing';
 import { parseUsageEntry } from './entry-parser';
 
+/** Per-model running totals within a Snapshot. */
+export interface ModelBucket {
+  costUSD: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Cache token totals within a Snapshot (read vs creation). */
+export interface CacheTotals {
+  readTokens: number;
+  creationTokens: number;
+}
+
+/** One user turn's content shape (text LENGTH only — never the text).
+ *  Shape matches habits.ts's UserTurnEvent so it feeds detectors directly. */
+export interface UserTurn {
+  sessionId: string | null;
+  userTextLength: number;
+  timestampMs: number;
+}
+
+/** An idle gap within one session followed by a cache-creation entry.
+ *  Shape matches habits.ts's SessionGapEvent. */
+export interface SessionGap {
+  sessionId: string;
+  gapMs: number;
+  cacheCreationTokensAfterGap: number;
+}
+
+// Only record gaps at least this long; the authoritative stale-cache-idle
+// threshold (gap AND cache-spike size) lives in habits.ts — this is just a
+// recording bound so the array stays small.
+const GAP_RECORD_MS = 5 * 60 * 1000;
+
 /** Today's running spend + token totals. */
 export interface Snapshot {
   totalCostUSD: number;
   inputTokens: number;
   outputTokens: number;
   entryCount: number;
+  /** Per-model cost/token split, keyed by the raw model id (or 'unknown'). */
+  perModel: Record<string, ModelBucket>;
+  cache: CacheTotals;
+  /** Distinct-session count + peak context size, for the long-sessions habit. */
+  sessions: { count: number; maxContextTokens: number };
+  /** Today's user turns (length only) — giant-paste / rage-retry habits. */
+  userTurns: UserTurn[];
+  /** Today's >5min-then-cache-rebuild gaps — stale-cache-idle habit. */
+  sessionGaps: SessionGap[];
 }
 
 export interface UsageMonitorOptions {
@@ -41,6 +84,8 @@ export class UsageMonitor {
   seenKeys!: Set<string>;
   snapshot!: Snapshot;
   currentDayStart!: Date;
+  // sessionId -> last assistant timestamp seen today (for gap detection).
+  sessionLastTs!: Map<string, number>;
 
   constructor({ projectsDir, pollMs = 3000 }: UsageMonitorOptions = {}) {
     this.projectsDir =
@@ -63,7 +108,13 @@ export class UsageMonitor {
       inputTokens: 0,
       outputTokens: 0,
       entryCount: 0,
+      perModel: {},
+      cache: { readTokens: 0, creationTokens: 0 },
+      sessions: { count: 0, maxContextTokens: 0 },
+      userTurns: [],
+      sessionGaps: [],
     };
+    this.sessionLastTs = new Map();
     this.currentDayStart = UsageMonitor.startOfToday();
   }
 
@@ -213,7 +264,7 @@ export class UsageMonitor {
     const parsed = parseUsageEntry(lineBuffer);
     if (!parsed) return;
 
-    // Local-day filter.
+    // Local-day filter (shared by assistant + user entries).
     const timestamp = parsed.timestamp;
     const now = new Date();
     if (
@@ -226,15 +277,70 @@ export class UsageMonitor {
     // rare race right at midnight rollover).
     if (timestamp.getTime() < this.currentDayStart.getTime()) return;
 
+    // User turns: record text LENGTH + session + time only (giant-paste /
+    // rage-retry). ponytail: no dedup key on user lines, so a truncation/
+    // re-read can double-count a turn — rare, and both detectors are
+    // conservative; daily reset bounds the array. Add a uuid dedup if it ever
+    // matters.
+    if (parsed.kind === 'user') {
+      this.snapshot.userTurns.push({
+        sessionId: parsed.sessionId,
+        userTextLength: parsed.userTextLength,
+        timestampMs: timestamp.getTime(),
+      });
+      return;
+    }
+
     // Dedup key — computed by the shared parser (lib/entry-parser.ts), whose
     // deterministic message.id → uuid → randomUUID fallback keeps id-less
     // entries from double-counting when a truncated/rotated file is re-read.
     if (this.seenKeys.has(parsed.key)) return;
     this.seenKeys.add(parsed.key);
 
-    this.snapshot.totalCostUSD += costForEntry(parsed.usage, parsed.model);
+    const cost = costForEntry(parsed.usage, parsed.model);
+    this.snapshot.totalCostUSD += cost;
     this.snapshot.inputTokens += parsed.inputTokens;
     this.snapshot.outputTokens += parsed.outputTokens;
     this.snapshot.entryCount += 1;
+
+    const modelKey = parsed.model || 'unknown';
+    const bucket = this.snapshot.perModel[modelKey] || {
+      costUSD: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    bucket.costUSD += cost;
+    bucket.inputTokens += parsed.inputTokens;
+    bucket.outputTokens += parsed.outputTokens;
+    this.snapshot.perModel[modelKey] = bucket;
+
+    this.snapshot.cache.readTokens += parsed.usage.cacheReadInputTokens;
+    this.snapshot.cache.creationTokens += parsed.usage.cacheCreationInputTokens;
+
+    // Session tracking: peak context (input + cache-read is the context the
+    // model actually saw) and a distinct-session count for long-sessions, plus
+    // a >5min idle gap followed by a cache-creation entry for stale-cache-idle.
+    if (parsed.sessionId) {
+      const contextTokens =
+        parsed.inputTokens + parsed.usage.cacheReadInputTokens;
+      if (contextTokens > this.snapshot.sessions.maxContextTokens) {
+        this.snapshot.sessions.maxContextTokens = contextTokens;
+      }
+      const ts = timestamp.getTime();
+      const lastTs = this.sessionLastTs.get(parsed.sessionId);
+      if (lastTs === undefined) {
+        this.snapshot.sessions.count += 1;
+      } else if (
+        ts - lastTs >= GAP_RECORD_MS &&
+        parsed.usage.cacheCreationInputTokens > 0
+      ) {
+        this.snapshot.sessionGaps.push({
+          sessionId: parsed.sessionId,
+          gapMs: ts - lastTs,
+          cacheCreationTokensAfterGap: parsed.usage.cacheCreationInputTokens,
+        });
+      }
+      this.sessionLastTs.set(parsed.sessionId, ts);
+    }
   }
 }

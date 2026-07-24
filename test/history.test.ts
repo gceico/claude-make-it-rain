@@ -10,8 +10,10 @@ import {
   rangeFor,
   dayKey,
   billCount,
+  billStacksLabel,
   History,
 } from '../src/lib/history';
+import { AnalyticsStore } from '../src/lib/analytics-store';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mir-history-test-'));
 const projectsDir = path.join(tmpRoot, 'projects');
@@ -65,6 +67,17 @@ const approx = (actual: number, expected: number, label: string) =>
     Math.abs(actual - expected) < 1e-9,
     `${label}: expected ${expected}, got ${actual}`
   );
+
+test('billStacksLabel: single pouch with a count prefix, empty below $100', () => {
+  assert.strictEqual(billStacksLabel(0), '', 'below $100 is empty');
+  assert.strictEqual(billStacksLabel(99.99), '', 'below $100 is empty');
+  assert.strictEqual(billStacksLabel(250), '2×💰');
+  assert.strictEqual(
+    billStacksLabel(1500),
+    '15×💰',
+    'no long trail, just a count'
+  );
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 test('helpers + range math', () => {
@@ -301,6 +314,67 @@ test('immutable past-days ledger (only today re-read on refresh)', async () => {
   } finally {
     fs.promises.readFile = realReadFile;
   }
+});
+
+// ── Historical habitCounts: written per stored day, summable across days ────
+test('ledger write populates per-day habitCounts and they sum across days', async () => {
+  const pDir = path.join(tmpRoot, 'projects-habitcounts', 'proj');
+  fs.mkdirSync(pDir, { recursive: true });
+
+  // Two PAST days (yesterday + 2 days ago), each one long session (>150k
+  // context via input tokens) so long-sessions fires once per stored day.
+  const longEntry = (dayOffset: number, sess: string, reqId: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: tsAt(dayOffset),
+      requestId: reqId,
+      sessionId: sess,
+      message: {
+        id: reqId + 'm',
+        model: 'claude-sonnet-5',
+        usage: { input_tokens: 200_000, output_tokens: 0 },
+      },
+    });
+  fs.writeFileSync(
+    path.join(pDir, 's.jsonl'),
+    [longEntry(-1, 'y1', 'r1'), longEntry(-2, 'y2', 'r2')].join('\n') + '\n'
+  );
+
+  const storeFile = path.join(tmpRoot, 'habitcounts-analytics.json');
+  const store = new AnalyticsStore(storeFile);
+  const h = new History({
+    projectsDir: path.join(tmpRoot, 'projects-habitcounts'),
+    cacheTtlMs: 10_000,
+    analyticsStore: store,
+  });
+  await h.get('last7days', { now: NOW });
+
+  const yKey = dayKey(new Date(2026, 5, 14, 12, 0, 0));
+  const y2Key = dayKey(new Date(2026, 5, 13, 12, 0, 0));
+  assert.strictEqual(
+    store.getDay(yKey).habitCounts['long-sessions'],
+    1,
+    'yesterday stored long-sessions count'
+  );
+  assert.strictEqual(
+    store.getDay(y2Key).habitCounts['long-sessions'],
+    1,
+    '2-days-ago stored long-sessions count'
+  );
+
+  // Cumulative sum across stored days (the main.ts cumulativeHabitCount logic).
+  let sum = 0;
+  for (const day of Object.values(store.data.dailySnapshots)) {
+    sum += day.habitCounts['long-sessions'] || 0;
+  }
+  assert.strictEqual(sum, 2, 'long-sessions seen 2× across history');
+
+  // tool-missing must NOT be poisoned into history (all-installed pass).
+  assert.strictEqual(
+    store.getDay(yKey).habitCounts['rtk-missing'],
+    undefined,
+    'tool-missing never written to historical habitCounts'
+  );
 });
 
 afterAll(() => {

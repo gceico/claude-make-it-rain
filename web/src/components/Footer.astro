@@ -5,8 +5,10 @@ import GithubIcon from './GithubIcon.astro';
 const REPO_URL = 'https://github.com/gceico/claude-make-it-rain';
 ---
 
-<footer class="site">
-  <div class="socials">
+<footer
+  class="relative z-10 mx-auto mt-[clamp(48px,9vh,88px)] max-w-[660px] border-t border-line px-[clamp(16px,5vw,24px)] pt-[clamp(28px,5vh,40px)] pb-6 text-center"
+>
+  <div class="flex flex-wrap justify-center gap-1.5">
     <a
       class="social"
       href="https://x.com/gceico"
@@ -44,7 +46,7 @@ const REPO_URL = 'https://github.com/gceico/claude-make-it-rain';
     </a>
   </div>
 
-  <div class="footlinks">
+  <div class="mt-3 flex flex-wrap justify-center gap-1">
     <button class="source-link" type="button" data-about-open>
       About Make It Rain
     </button>

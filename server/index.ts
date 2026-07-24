@@ -6,9 +6,13 @@
  * Deploys to Railway from the Dockerfile (see server/Dockerfile).
  *
  * Endpoints:
- *   POST /api/report        body { tag: string, total: number } -> { ok, total }
- *   GET  /api/leaderboard   -> { date, entries: [{ tag, total }] } (today only)
- *   GET  /api/collective    -> { date, total, activeTags, hours: [{hour,spend}] }
+ *   POST /api/report        body { tag, total, savedUSD?, optimized? } -> { ok, total }
+ *                              (savedUSD is the ONE additional field the
+ *                              Optimize release adds — an anonymized net-
+ *                              savings figure, optional/back-compatible)
+ *   GET  /api/leaderboard   -> { date, entries: [{ tag, total, saved, optimized }] } (today only)
+ *   GET  /api/collective    -> { date, total, activeTags, savedTotal,
+ *                                hours: [{hour,spend}] }
  *                              (+ ?tag=X adds you: { tag, total } for the personal view)
  *   GET  /api/stars         -> { stars: number|null } (GitHub stars, cached)
  *   GET  /                  -> static landing page (STATIC_DIR, see below)
@@ -318,7 +322,33 @@ export function createApp(config: AppConfig = {}): App {
     }
     const total = Math.round(totalRaw * 100) / 100;
 
-    const stored = db.report(tag, total);
+    // savedUSD is the ONE additional field this release adds (see
+    // docs/DECISIONS.md's documented exception to §3.1) — optional and
+    // back-compatible: an absent/invalid value is simply not recorded rather
+    // than rejecting the whole report (older clients never send it).
+    const savedRaw = obj.savedUSD;
+    let savedUSD: number | undefined;
+    if (
+      typeof savedRaw === 'number' &&
+      isFinite(savedRaw) &&
+      savedRaw >= 0 &&
+      savedRaw <= maxTotal
+    ) {
+      savedUSD = Math.round(savedRaw * 100) / 100;
+    }
+
+    // `optimized`: single anonymous bool — does this tag run the full Optimize
+    // toolchain. Absent from older clients; treated as false then.
+    const optimized = obj.optimized === true;
+
+    const stored = db.report(
+      tag,
+      total,
+      undefined,
+      undefined,
+      savedUSD,
+      optimized
+    );
     return jsonResponse(200, { ok: true, total: stored });
   }
 
@@ -356,13 +386,20 @@ export function createApp(config: AppConfig = {}): App {
         date: day,
         total: db.collectiveTotal(day),
         activeTags: db.activeTags(day),
+        // Aggregate-only, per the board's collective-not-ranking philosophy
+        // (matches `total`/`activeTags` above — never a per-tag figure).
+        savedTotal: db.collectiveSavedTotal(day),
         hours: db.hourlySeries(day),
       };
       // Personal view: ?tag=X echoes that tag's own total so the page can show
       // "your share of the collective" even for tags outside the top-100 board.
       const tag = sanitizeTag(url.searchParams.get('tag'));
       if (tag) {
-        body.you = { tag, total: db.tagTotal(tag, day) };
+        body.you = {
+          tag,
+          total: db.tagTotal(tag, day),
+          saved: db.tagSaved(tag, day),
+        };
       }
       return jsonResponse(200, body);
     }
