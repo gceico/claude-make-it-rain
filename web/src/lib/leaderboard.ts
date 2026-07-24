@@ -324,9 +324,7 @@ function renderReflection(
   }
   if (share > 0) {
     items.push(
-      '<li><b>' +
-        share +
-        '%</b> of everything the community spent today</li>'
+      '<li><b>' + share + '%</b> of everything the community spent today</li>'
     );
   }
   const saved =
