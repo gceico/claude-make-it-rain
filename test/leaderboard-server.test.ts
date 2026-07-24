@@ -284,6 +284,46 @@ test('GET /api/collective returns date, total, activeTags and a 24-bucket series
   expect(data.you).toBeUndefined();
 });
 
+test('POST /api/report with savedUSD is accepted and reflected in /api/collective savedTotal', async () => {
+  const before = JSON.parse(
+    (await request('GET', '/api/collective')).body
+  ).savedTotal;
+  const res = await request('POST', '/api/report', {
+    tag: 'SaverPerson',
+    total: 5,
+    savedUSD: 2.567,
+  });
+  expect(res.status).toBe(200);
+  const after = JSON.parse(
+    (await request('GET', '/api/collective')).body
+  ).savedTotal;
+  expect(Math.round((after - before) * 100) / 100).toBe(2.57); // rounded to cents
+});
+
+test('POST /api/report omitting savedUSD still succeeds (back-compatible)', async () => {
+  const res = await request('POST', '/api/report', {
+    tag: 'NoSavedField',
+    total: 1,
+  });
+  expect(res.status).toBe(200);
+});
+
+test('POST /api/report with an invalid savedUSD (negative) is ignored, not rejected', async () => {
+  const before = JSON.parse(
+    (await request('GET', '/api/collective')).body
+  ).savedTotal;
+  const res = await request('POST', '/api/report', {
+    tag: 'BadSavedField',
+    total: 1,
+    savedUSD: -5,
+  });
+  expect(res.status).toBe(200); // the whole report is not rejected
+  const after = JSON.parse(
+    (await request('GET', '/api/collective')).body
+  ).savedTotal;
+  expect(after).toBe(before); // but the bad savedUSD was simply not recorded
+});
+
 test('GET /api/collective?tag= echoes a sanitized personal total', async () => {
   await request('POST', '/api/report', { tag: 'MeTag', total: 15 });
   const res = await request(

@@ -1,4 +1,40 @@
-    /* Big Shoulders Display, condensed industrial display for the wordmark and
+@import "tailwindcss";
+
+@theme {
+  /* Cash-on-midnight identity, ported unchanged from :root below so Tailwind
+     utilities (bg-surface, text-ink, text-accent, ...) resolve to the same
+     dark values — this "borrows" Tailwind's token system without touching
+     the palette. */
+  --color-bg: #0a0e1c;
+  --color-bg-2: #0e1428;
+  --color-surface: #121a30;
+  --color-surface-2: #16203c;
+  --color-ink: #f2f5ff;
+  --color-muted: #9aa7cc;
+  --color-muted-strong: #b8c2e0;
+  --color-accent: #35d07f;
+  --color-accent-deep: #1f9d5c;
+  --color-gold: #ffd23f;
+  --color-gold-deep: #d9a212;
+  --color-silver: #d6ddf0;
+  --color-bronze: #e0a878;
+  --color-line: #22305480;
+  --color-line-solid: #223054;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+    "Cascadia Mono", "Roboto Mono", monospace;
+  --font-display: "Big Shoulders Display", "Arial Narrow", var(--font-sans);
+
+  /* Duolingo structural tokens: 8px spacing grid + the two radii used
+     throughout (buttons/cards vs. small badges). Dark palette is unchanged. */
+  --spacing: 8px;
+  --radius-badge: 2px;
+  --radius-btn: 12px;
+}
+
+/* Big Shoulders Display, condensed industrial display for the wordmark and
    the headline figure. Embedded as a data URI: the page CSP pins everything
    to self, so no external font host is reachable. Latin subset, ~14KB. */
 @font-face {
@@ -36,6 +72,12 @@
   --display: "Big Shoulders Display", "Arial Narrow", var(--sans);
 }
 
+/* Everything below is the irreducible bespoke CSS the plan calls out to keep
+   as plain CSS (animations, dialog, chart, state variants) — wrapped in the
+   components layer so Tailwind utility classes placed alongside these
+   selectors in markup still win the cascade. */
+@layer components {
+
 * { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -44,17 +86,76 @@ body {
   margin: 0;
   font: 16px/1.6 var(--sans);
   color: var(--ink);
-  background:
-    radial-gradient(900px 520px at 20% -8%, #14b86a1f 0, transparent 60%),
-    radial-gradient(1000px 620px at 82% -12%, #ffd23f14 0, transparent 62%),
-    linear-gradient(180deg, var(--bg-2) 0, var(--bg) 42%);
   background-color: var(--bg);
-  background-attachment: fixed;
   min-height: 100vh;
   overflow-x: hidden;
 }
 
 a { color: inherit; }
+
+/* ── Night sky ─────────────────────────────────────────────────────────────
+   A calm, chill nocturne behind everything: a deep vertical gradient, two
+   faint money-toned auroras low on the horizon, and a hand-scattered
+   starfield that fades out before the content starts. Pure CSS so the page
+   stays a single self-contained file (no extra asset request, CSP-safe).
+   To drop in a generated night-scene photo instead: put it at
+   /public/hero.png and set  --hero-img: url(/hero.png)  on .sky below. */
+.sky {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  --hero-img: url(/hero.png);
+  background:
+    radial-gradient(130% 90% at 50% -25%, #1b2650 0, transparent 55%),
+    radial-gradient(70% 50% at 84% 12%, #ffd23f14 0, transparent 60%),
+    radial-gradient(70% 50% at 14% 6%, #35d07f16 0, transparent 60%),
+    linear-gradient(180deg, #0c1128 0, #0a0e1c 46%, #090c17 100%);
+}
+/* Optional generated photo layer — inert until --hero-img is set. */
+.sky::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--hero-img, none);
+  background-size: cover;
+  background-position: center top;
+  opacity: 0.55;
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 82%);
+  mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 82%);
+}
+/* Starfield — a fixed constellation, faded before it reaches the content. */
+.sky::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 18%, #ffffffcc, transparent),
+    radial-gradient(1px 1px at 24% 9%, #ffffff88, transparent),
+    radial-gradient(1.5px 1.5px at 38% 24%, #eaf0ffbb, transparent),
+    radial-gradient(1px 1px at 52% 12%, #ffffff77, transparent),
+    radial-gradient(1.5px 1.5px at 63% 28%, #ffffffb0, transparent),
+    radial-gradient(1px 1px at 71% 7%, #ffffff88, transparent),
+    radial-gradient(2px 2px at 79% 20%, #fff6d9cc, transparent),
+    radial-gradient(1px 1px at 88% 32%, #ffffff77, transparent),
+    radial-gradient(1px 1px at 6% 34%, #ffffff66, transparent),
+    radial-gradient(1.5px 1.5px at 46% 36%, #ffffff88, transparent),
+    radial-gradient(1px 1px at 94% 15%, #ffffff77, transparent),
+    radial-gradient(1px 1px at 32% 4%, #ffffff88, transparent);
+  background-repeat: no-repeat;
+  opacity: 0.85;
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 30%, transparent 62%);
+  mask-image: linear-gradient(180deg, #000 0, #000 30%, transparent 62%);
+  animation: twinkle 6s ease-in-out infinite;
+}
+@keyframes twinkle {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky::after { animation: none; }
+}
 
 /* ── Ambient falling money ─────────────────────────────────────────────── */
 .rain {
@@ -251,7 +352,7 @@ dialog.about[open]::backdrop { animation: about-fade .32s var(--ease-out) both; 
 }
 .about-faq-item {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-btn);
   background: color-mix(in oklab, var(--surface) 82%, transparent);
   margin-bottom: 8px;
   overflow: hidden;
@@ -271,7 +372,7 @@ dialog.about[open]::backdrop { animation: about-fade .32s var(--ease-out) both; 
 }
 .about-faq-item summary::-webkit-details-marker { display: none; }
 .about-faq-item summary:hover { color: var(--accent); }
-.about-faq-item summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+.about-faq-item summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-btn); }
 .about-faq-chev {
   flex: none;
   width: 18px; height: 18px;
@@ -288,46 +389,11 @@ dialog.about[open]::backdrop { animation: about-fade .32s var(--ease-out) both; 
   line-height: 1.65;
 }
 
-/* ── Layout ────────────────────────────────────────────────────────────── */
-.wrap {
-  position: relative;
-  z-index: var(--z-content);
-  max-width: 660px;
-  margin: 0 auto;
-  padding: clamp(64px, 12vh, 120px) clamp(16px, 5vw, 24px) 48px;
-}
-
-header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
-.wordmark {
-  font-family: var(--display);
-  font-weight: 800;
-  font-size: clamp(2.2rem, 8.5vw, 4.6rem);
-  letter-spacing: 0.005em;
-  line-height: 0.96;
-  text-transform: uppercase;
-  margin: 0;
-  text-wrap: balance;
-}
-.wordmark .rain-emoji {
-  font-size: 0.82em;
-  margin-right: 0.12em;
-  filter: drop-shadow(0 3px 8px #ffd23f4d);
-  -webkit-user-select: none;
-  user-select: none;
-}
-.tagline {
-  color: var(--muted-strong);
-  margin: 12px 0 0;
-  font-size: clamp(0.98rem, 2.4vw, 1.08rem);
-  text-wrap: balance;
-}
-.pills {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
+/* ── Layout ─────────────────────────────────────────────────────────────
+   .wrap / header.hero / .wordmark / .tagline / .pills moved to Tailwind
+   utilities on the markup (index.astro / Hero.astro) — none of them are
+   referenced by leaderboard.ts or need a state variant, so they don't need
+   a CSS hook here. */
 .datepill {
   display: inline-flex;
   align-items: center;
@@ -340,7 +406,9 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   font: 600 0.82rem/1 var(--sans);
   letter-spacing: .02em;
 }
-.datepill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 0 var(--gold); }
+.datepill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+/* Live "Today" indicator: a soft gold halo. The reset dot stays a neutral pulse. */
+.datepill:not(.reset) .dot { box-shadow: 0 0 7px 0 color-mix(in oklab, var(--gold) 65%, transparent); }
 .datepill .date { font-family: var(--mono); font-weight: 700; }
 /* Reset countdown, neutral so the gold date pill stays the primary accent. */
 .datepill.reset {
@@ -371,33 +439,43 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 .tally .cap { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
 .tally .cap b { color: var(--muted-strong); font-weight: 600; }
 
-/* ── Get started ───────────────────────────────────────────────────────── */
-/* Two compact click-to-copy command rows. Deliberately low-profile so the
-   leaderboard stays the star of the page. */
+/* ── Get started ─────────────────────────────────────────────────────────
+   One prominent copy-to-install command as the hero's call to action, with
+   the run step as a quiet caption beneath it. */
 .install {
-  margin: clamp(20px, 4vh, 30px) auto 0;
+  margin: clamp(22px, 4.5vh, 34px) auto 0;
+  width: min(100%, 540px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
 }
 .install .cmd {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 12px 10px 14px;
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--surface) 88%, transparent);
-  border: 1px solid var(--line);
+  padding: 13px 14px 13px 16px;
+  border-radius: var(--radius-btn);
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--line-solid));
+  box-shadow:
+    0 1px 0 0 #ffffff0a inset,
+    0 18px 40px -24px #000e,
+    0 0 44px -20px color-mix(in oklab, var(--accent) 55%, transparent);
   color: var(--ink);
   cursor: pointer;
   text-align: left;
   font: inherit;
-  transition: border-color .22s var(--ease-out), background .22s var(--ease-out);
+  transition: border-color .22s var(--ease-out), box-shadow .22s var(--ease-out),
+    transform .22s var(--ease-out);
 }
-.install .cmd:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line-solid)); }
+.install .cmd:hover {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  transform: translateY(-1px);
+}
 .install .cmd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.install .cmd.copied { border-color: color-mix(in oklab, var(--accent) 60%, transparent); }
+.install .cmd.copied { border-color: color-mix(in oklab, var(--accent) 70%, transparent); }
 .install .prompt {
   font-family: var(--mono);
   font-weight: 700;
@@ -409,42 +487,75 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   flex: 1;
   min-width: 0;
   font-family: var(--mono);
-  font-size: clamp(0.8rem, 2.6vw, 0.92rem);
-  color: var(--muted-strong);
-  overflow-wrap: anywhere;
+  font-size: clamp(0.78rem, 2.4vw, 0.9rem);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .install .copy {
   flex: none;
-  font: 600 0.72rem/1 var(--sans);
-  letter-spacing: .04em;
+  font: 700 0.7rem/1 var(--sans);
+  letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--muted);
   -webkit-user-select: none;
   user-select: none;
   transition: color .22s var(--ease-out);
 }
-.install .cmd:hover .copy { color: var(--muted-strong); }
+.install .cmd:hover .copy { color: var(--accent); }
 .install .cmd.copied .copy { color: var(--accent); }
+/* Run step — a quiet caption with an inline click-to-copy command. */
+.run-note {
+  margin: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.run-cmd {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  font-weight: 600;
+  color: var(--muted-strong);
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed color-mix(in oklab, var(--muted) 55%, transparent);
+  padding: 0 1px 1px;
+  cursor: pointer;
+  transition: color .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.run-cmd:hover, .run-cmd:focus-visible {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+.run-cmd.copied { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* ── Board ─────────────────────────────────────────────────────────────── */
+/* One surface holding the whole list; rows are separated by hairline dividers,
+   not turned into six repeated cards. State/empty cases carry their own card,
+   so the container surface steps aside to avoid a card-in-a-card. */
 .board {
   margin-top: clamp(28px, 5vh, 40px);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding: 2px 0;
+  border-radius: var(--radius-btn);
+  background: color-mix(in oklab, var(--surface) 94%, transparent);
+  border: 1px solid var(--line);
+  overflow: hidden;
 }
+.board:has(.state) { padding: 0; background: none; border: none; }
 .row {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: clamp(10px, 3vw, 16px);
   padding: 14px clamp(14px, 3.5vw, 20px);
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--surface) 88%, transparent);
-  border: 1px solid var(--line);
-  transition: transform .22s var(--ease-out), border-color .22s var(--ease-out), background .22s var(--ease-out);
+  transition: background .22s var(--ease-out);
 }
-.row:hover { transform: translateY(-1px); border-color: color-mix(in oklab, var(--accent) 40%, var(--line-solid)); }
+.row:not(:last-child) { border-bottom: 1px solid var(--line); }
+.row:hover { background: color-mix(in oklab, var(--accent) 7%, transparent); }
 .row .tag {
   font-weight: 650;
   font-size: clamp(0.98rem, 2.6vw, 1.08rem);
@@ -458,18 +569,30 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
   color: var(--accent);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
-
+.row .amt .saved {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--accent);
+  opacity: 0.9;
+}
 .state {
   text-align: center;
   color: var(--muted);
-  padding: 48px 22px;
-  background: color-mix(in oklab, var(--surface) 70%, transparent);
-  border: 1px dashed var(--line-solid);
-  border-radius: 16px;
+  padding: 30px 22px;
+  font-size: 0.94rem;
+  line-height: 1.5;
 }
-.state .big { font-size: 2.2rem; display: block; margin-bottom: 10px; }
-.state .lead { color: var(--muted-strong); font-weight: 600; }
+.state .lead {
+  display: block;
+  color: var(--muted-strong);
+  font-weight: 650;
+  margin-bottom: 3px;
+}
 
 .skel { position: relative; overflow: hidden; }
 .skel .row { pointer-events: none; }
@@ -485,17 +608,9 @@ header.hero { text-align: center; margin-bottom: clamp(28px, 5vh, 44px); }
 }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 
-/* ── Footer ────────────────────────────────────────────────────────────── */
-footer.site {
-  position: relative;
-  z-index: var(--z-content);
-  max-width: 660px;
-  margin: clamp(48px, 9vh, 88px) auto 0;
-  padding: clamp(28px, 5vh, 40px) clamp(16px, 5vw, 24px) 44px;
-  border-top: 1px solid var(--line);
-  text-align: center;
-}
-.socials { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+/* ── Footer ─────────────────────────────────────────────────────────────
+   footer.site / .socials / .footlinks layout moved to Tailwind utilities
+   in Footer.astro — .social / .source-link stay here (hover/focus states). */
 .social {
   display: inline-flex;
   align-items: center;
@@ -515,13 +630,6 @@ footer.site {
   border-color: color-mix(in oklab, var(--accent) 45%, var(--line-solid));
   background: color-mix(in oklab, var(--surface-2) 85%, transparent);
   outline: none;
-}
-.footlinks {
-  margin-top: 22px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
 }
 .source-link {
   display: inline-flex;
@@ -545,21 +653,22 @@ footer.site {
 .credit a:hover, .credit a:focus-visible { color: var(--accent); border-bottom-color: var(--accent); outline: none; }
 
 /* Collective equivalence line under the tally, e.g. "≈ a trip to Greece". */
-.collective-eq {
+.tally-meta {
   margin: 12px 0 0;
   color: var(--gold);
   font-weight: 650;
   font-size: clamp(0.95rem, 2.6vw, 1.08rem);
   text-wrap: balance;
 }
-.collective-eq:empty { display: none; }
+.tally-meta:empty { display: none; }
+.tally-meta .meta-saved { color: var(--accent); }
 
 /* ── Collective-spend curve ────────────────────────────────────────────────── */
 .graph {
   margin-top: clamp(26px, 5vh, 38px);
   padding: clamp(16px, 3.5vw, 22px);
   border-radius: 16px;
-  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  background: color-mix(in oklab, var(--surface) 94%, transparent);
   border: 1px solid var(--line);
 }
 .graph[hidden] { display: none; }
@@ -604,64 +713,69 @@ footer.site {
 
 /* ── Personal reflection panel (opened via ?tag=) ──────────────────────────── */
 .reflect {
-  margin-top: clamp(24px, 4vh, 34px);
-  padding: clamp(20px, 4vw, 30px);
+  margin-top: clamp(28px, 5vh, 40px);
+  padding: clamp(28px, 5vw, 40px) clamp(22px, 4vw, 34px);
   border-radius: 18px;
   text-align: center;
   background:
-    radial-gradient(120% 140% at 50% 0%, #35d07f14 0, transparent 60%),
-    color-mix(in oklab, var(--surface-2) 92%, transparent);
-  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--line-solid));
-  box-shadow: 0 22px 60px -34px #35d07f4d, inset 0 1px 0 0 #ffffff0f;
+    radial-gradient(120% 150% at 50% 0%, #35d07f0d 0, transparent 64%),
+    color-mix(in oklab, var(--surface-2) 86%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--line-solid));
+  box-shadow: 0 20px 60px -42px #35d07f33, inset 0 1px 0 0 #ffffff0a;
 }
 .reflect[hidden] { display: none; }
 .reflect-eyebrow, .reflect-tag {
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.76rem;
-  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 0.92rem;
+  font-weight: 500;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
+.reflect-name { color: var(--muted-strong); font-weight: 650; }
 .reflect-amt {
-  margin: 6px 0 4px;
+  margin: 12px 0 0;
   font-family: var(--display);
   font-weight: 800;
-  font-size: clamp(2.6rem, 11vw, 4rem);
+  font-size: clamp(2.8rem, 11vw, 4.2rem);
   line-height: 0.94;
   color: var(--accent);
-  text-shadow: 0 0 40px #35d07f42;
+  text-shadow: 0 0 40px #35d07f38;
 }
 .reflect-list {
   list-style: none;
-  margin: 16px auto 0;
+  margin: 26px auto 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 34ch;
+  gap: 13px;
+  max-width: 40ch;
   text-align: left;
 }
 .reflect-list li {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 11px;
   color: var(--muted-strong);
-  font-size: clamp(0.94rem, 2.5vw, 1.02rem);
+  font-size: clamp(0.95rem, 2.5vw, 1.03rem);
+  line-height: 1.5;
 }
 .reflect-list b { color: var(--ink); font-weight: 700; }
-.reflect-list .re-emoji { flex: none; }
+/* The closing question — the emotional heart of the app. Deliberately quiet:
+   a hairline rule and a soft italic line, not a display-caps shout. */
 .reflect-kicker {
-  margin: 18px 0 0;
-  font-family: var(--display);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.01em;
-  font-size: clamp(1.2rem, 4.5vw, 1.8rem);
+  margin: 28px auto 0;
+  padding-top: 24px;
+  max-width: 30ch;
+  border-top: 1px solid var(--line);
+  font-family: var(--sans);
+  font-style: italic;
+  font-weight: 500;
+  font-size: clamp(1.1rem, 3vw, 1.35rem);
+  letter-spacing: 0;
   color: var(--gold);
-  text-shadow: 0 0 30px #ffd23f30;
 }
-.reflect-none { margin: 12px 0 0; color: var(--muted-strong); }
+.reflect-none { margin: 14px 0 0; color: var(--muted-strong); }
 
 /* Board section heading (light "everyone raining today" label). */
 .board-h {
@@ -687,8 +801,10 @@ footer.site {
 
 @media (prefers-reduced-motion: reduce) {
   .rain { display: none; }
-  .reveal, .tally.show, .skel::after { animation: none; }
+  .reveal, .tally.show, .skel::after, .datepill.reset .dot { animation: none; }
   dialog.about[open], dialog.about[open]::backdrop { animation: none; }
   .row, .ghstar, .social, .source-link, .about-close { transition: none; }
   .about-faq-item summary, .about-faq-chev { transition: none; }
 }
+
+} /* @layer components */

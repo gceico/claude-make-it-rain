@@ -11,6 +11,7 @@ import {
   screen,
   shell,
   session,
+  dialog,
 } from 'electron';
 import type {
   MenuItemConstructorOptions,
@@ -29,7 +30,7 @@ import { Config } from './lib/config';
 import * as denominations from './lib/denominations';
 import * as equivalences from './lib/equivalences';
 import { LeaderboardClient } from './lib/leaderboard-client';
-import { History, RANGES, billCount } from './lib/history';
+import { History, RANGES, billStacksLabel, dayKey } from './lib/history';
 import type { Range, RangeResult, DayEntry } from './lib/history';
 import {
   stackCountForCrossing,
@@ -37,6 +38,30 @@ import {
   crossedHundred,
 } from './lib/milestones';
 import { UpdateChecker, shouldNotify } from './lib/update-checker';
+import { AnalyticsStore, emptyDailySnapshot } from './lib/analytics-store';
+import type { ToolingState } from './lib/analytics-store';
+import { runHabitDetectors, habitOfTheDay } from './lib/habits';
+import type { HabitInput } from './lib/habits';
+import { optimizationScore } from './lib/score';
+import {
+  detectTooling,
+  installPlan,
+  runInstallPlan,
+  fetchRtkGainJson,
+  enrichPath,
+  TOOL_COMMANDS,
+  TOOL_IDS,
+  TOOL_LABELS,
+} from './lib/tooling';
+import type { CommandResult } from './lib/tooling';
+import {
+  parseRtkGainJson,
+  parseRtkDailySavings,
+  estimateDailyToolSavings,
+} from './lib/score';
+import type { DayToolSavings } from './lib/score';
+import type { DailySnapshot } from './lib/analytics-store';
+import { pricingForModel } from './lib/pricing';
 
 // We only ever play synthesized output audio (Web Audio oscillators in the
 // overlay) — nothing here captures audio. On macOS, Chromium's audio stack can
@@ -86,12 +111,73 @@ let latestSnapshot: Snapshot = {
   inputTokens: 0,
   outputTokens: 0,
   entryCount: 0,
+  perModel: {},
+  cache: { readTokens: 0, creationTokens: 0 },
+  sessions: { count: 0, maxContextTokens: 0 },
+  userTurns: [],
+  sessionGaps: [],
 };
 let initialScanHandled = false;
 let history: History | null = null;
 // rangeId -> scan result (or 'loading'); drives the "Past spending" submenu.
 const historyData = new Map<string, RangeResult | 'loading'>();
 const HISTORY_REFRESH_MS = 60_000;
+const DAILY_TOOLING_CHECK_MS = 24 * 60 * 60 * 1000;
+
+// ── Optimize / analytics globals ────────────────────────────────────────────
+let analyticsStore: AnalyticsStore | null = null;
+let toolingState: ToolingState = {
+  rtk: { installed: false, version: null, detectedAtMs: 0 },
+  caveman: { installed: false, version: null, detectedAtMs: 0 },
+  ponytail: { installed: false, version: null, detectedAtMs: 0 },
+};
+let optimizeInProgress = false;
+// Previous savings.lifetimeUSD, so tray/animation code can detect a crossing
+// the same way spend milestones do (see lib/milestones.ts's savings* wrappers).
+let previousSavingsUSD = 0;
+// date 'YYYY-MM-DD' -> real RTK savedUSD for that day (from `rtk gain` daily[]).
+let rtkDailySavings: Record<string, number> = {};
+// RTK's real lifetime saved (priced summary.total_saved); the lifetime clamp
+// uses this authoritative figure as its floor.
+let previousRtkLifetimeReal = 0;
+// True when an installed tool has a newer version available (rtk via brew).
+let toolingUpdateAvailable = false;
+let toolingUpdateInProgress = false;
+
+/** Real command runner for lib/tooling.ts: execFile with a static argv array
+ *  (never a shell string built from interpolated input — mirrors runUpdate()
+ *  below). shell:true is intentionally NEVER passed here; RTK's universal
+ *  installer already encodes its one deliberate curl|sh pipeline as a static
+ *  `sh -c '<literal>'` argv element, so no shell wrapping is needed. */
+function realCommandRunner(
+  cmd: string,
+  args: string[]
+): Promise<CommandResult> {
+  // A Finder/GUI-launched Electron app inherits a minimal PATH that omits
+  // /opt/homebrew/bin, ~/.local/bin, ~/.cargo/bin — so rtk/claude/brew/which
+  // all fail even when installed. Enrich PATH for the child (see enrichPath).
+  const env = { ...process.env, PATH: enrichPath(process.env.PATH) };
+  return new Promise((resolve) => {
+    execFile(
+      cmd,
+      args,
+      { timeout: 5 * 60 * 1000, env },
+      (err, stdout, stderr) => {
+        const code =
+          err && typeof (err as NodeJS.ErrnoException).code !== 'number'
+            ? 1
+            : err
+              ? ((err as unknown as { code?: number }).code ?? 1)
+              : 0;
+        resolve({
+          code,
+          stdout: String(stdout || ''),
+          stderr: String(stderr || ''),
+        });
+      }
+    );
+  });
+}
 
 // 16x16 green square fallback for platforms without tray title text (win/linux).
 const FALLBACK_ICON_B64 =
@@ -113,9 +199,14 @@ function formatTitle(total: number): string {
   return `${emoji} $${total.toFixed(2)}`;
 }
 
-/** N × 💰, one per $100 spent (empty string below $100). */
-function billStacks(costUSD: number): string {
-  return '💰'.repeat(billCount(costUSD));
+/** Token count as a compact figure: 1M / 12.3k / 950. */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${m >= 10 ? Math.round(m) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1000)}k`;
+  return `${n}`;
 }
 
 /** Days in a scan whose own spend hit $100 — the "rain days". */
@@ -123,27 +214,73 @@ function rainDayCount(days: DayEntry[]): number {
   return days.filter((d) => d.costUSD >= 100).length;
 }
 
-/** Builds the label + per-day submenu for one range from its scan result. */
+/** The Optimize tray item, reflecting tooling state: install missing tools,
+ *  else offer an update when one is available, else a status line. */
+function optimizeMenuItem(anyMissing: boolean): MenuItemConstructorOptions {
+  if (anyMissing) {
+    return {
+      label: optimizeInProgress ? '⚡ Optimizing…' : '⚡ Optimize your spend…',
+      enabled: !optimizeInProgress,
+      click: () => runOptimize(),
+    };
+  }
+  if (toolingUpdateAvailable) {
+    return {
+      label: toolingUpdateInProgress
+        ? '⚡ Updating tools…'
+        : '⚡ Update your tools (new version)',
+      enabled: !toolingUpdateInProgress,
+      click: () => runToolUpdate(),
+    };
+  }
+  return {
+    label: '⚡ Optimize (tools up to date)',
+    enabled: !optimizeInProgress,
+    click: () => runOptimize(), // shows the "everything installed" status sheet
+  };
+}
+
+/** ` · saved [≈ ]$Y` suffix for a savings figure, or '' when zero. `≈` marks
+ *  an estimated (Caveman/Ponytail) contribution; a pure-RTK figure is exact. */
+function savedSuffix(savedUSD: number, hasEstimate: boolean): string {
+  if (savedUSD <= 0) return '';
+  return ` · saved ${hasEstimate ? '≈ ' : ''}$${savedUSD.toFixed(2)}`;
+}
+
+/** Builds the label + per-day submenu for one range from its scan result.
+ *  Cost is already net (post-savings, see item E) so labels read `net $X`;
+ *  the money avoided is shown alongside as `saved [≈ ]$Y`. */
 function historyMenuItem(range: Range): MenuItemConstructorOptions {
   const data = historyData.get(range.id);
   if (!data || data === 'loading') {
     return { label: `${range.label}: …`, enabled: false };
   }
 
-  const stacks = billStacks(data.totalCostUSD);
+  // Sum per-day savings over the range (real RTK + estimated Caveman/Ponytail).
+  let rangeSaved = 0;
+  let rangeHasEstimate = false;
+  for (const d of data.days) {
+    const sv = daySavings(d.date);
+    rangeSaved += sv.total;
+    rangeHasEstimate = rangeHasEstimate || sv.hasEstimate;
+  }
+
+  const stacks = billStacksLabel(data.totalCostUSD);
   const rainDays = rainDayCount(data.days);
-  let label = `${range.label}: $${data.totalCostUSD.toFixed(2)}`;
+  let label = `${range.label}: net $${data.totalCostUSD.toFixed(2)}`;
+  label += savedSuffix(rangeSaved, rangeHasEstimate);
   if (stacks) label += ` · ${stacks}`;
   if (rainDays > 0)
     label += ` (${rainDays} rain day${rainDays === 1 ? '' : 's'})`;
 
-  // Per-day breakdown, most recent first, with 💰 per $100 that day.
+  // Per-day breakdown, most recent first, with 💰 per $100 (capped) that day.
   const dayItems: MenuItemConstructorOptions[] = [...data.days]
     .reverse()
     .map((d) => {
-      const s = billStacks(d.costUSD);
+      const s = billStacksLabel(d.costUSD);
+      const sv = daySavings(d.date);
       return {
-        label: `${d.date}: $${d.costUSD.toFixed(2)}${s ? '  ' + s : ''}`,
+        label: `${d.date}: net $${d.costUSD.toFixed(2)}${savedSuffix(sv.total, sv.hasEstimate)}${s ? '  ' + s : ''}`,
         enabled: false,
       };
     });
@@ -182,6 +319,106 @@ function wealthSubmenu(totalUSD: number): MenuItemConstructorOptions[] {
   return items;
 }
 
+/** Maps the live, in-memory Snapshot (usage-monitor.ts) to the analytics
+ *  store's DailySnapshot shape, for feeding today's numbers into the habit
+ *  engine / score before today has been persisted (only completed days are
+ *  written to analytics-store — see history.ts's ledger scan). Sessions,
+ *  user turns, and idle gaps are now tracked live by the monitor, so all
+ *  detectors fire on today's data. */
+function liveDailySnapshot(): import('./lib/analytics-store').DailySnapshot {
+  const s = latestSnapshot;
+  const perModel: Record<
+    string,
+    { costUSD: number; inTok: number; outTok: number }
+  > = {};
+  for (const [model, m] of Object.entries(s.perModel)) {
+    perModel[model] = {
+      costUSD: m.costUSD,
+      inTok: m.inputTokens,
+      outTok: m.outputTokens,
+    };
+  }
+  const totalCacheTok = s.cache.readTokens + s.cache.creationTokens;
+  return {
+    costUSD: s.totalCostUSD,
+    perModel,
+    cache: {
+      readTok: s.cache.readTokens,
+      creationTok: s.cache.creationTokens,
+      hitRatio: totalCacheTok > 0 ? s.cache.readTokens / totalCacheTok : 0,
+    },
+    sessions: { ...s.sessions },
+    habitCounts: {},
+  };
+}
+
+function buildHabitInput(): HabitInput {
+  return {
+    snapshot: liveDailySnapshot(),
+    toolingState,
+    userTurns: latestSnapshot.userTurns,
+    sessionGaps: latestSnapshot.sessionGaps,
+  };
+}
+
+/** Cumulative "seen N×" total for a habit id: sum of every stored day's
+ *  habitCounts[id] (finalized days) plus today's live count on top. */
+function cumulativeHabitCount(id: string, liveCount: number): number {
+  let total = liveCount;
+  if (analyticsStore) {
+    for (const day of Object.values(analyticsStore.data.dailySnapshots)) {
+      total += day.habitCounts[id] || 0;
+    }
+  }
+  return total;
+}
+
+/** The "Your habits" submenu: every non-"info" detector with its cumulative
+ *  occurrence count (stored history + today's live count), neutral-coach
+ *  copy, no roasting. */
+function habitsSubmenu(): MenuItemConstructorOptions[] {
+  const results = runHabitDetectors(buildHabitInput());
+  const actionable = results.filter((r) => r.severity !== 'info');
+  if (actionable.length === 0) {
+    return [{ label: 'No habits flagged today', enabled: false }];
+  }
+  return actionable.map((r) => {
+    const seen = cumulativeHabitCount(r.id, r.count);
+    return {
+      label: `${r.triggered ? '•' : '✓'} ${r.coachCopy}${seen > 0 ? ` (seen ${seen}×)` : ''}`,
+      enabled: false,
+    };
+  });
+}
+
+/** Awareness facts (model split, cache rate, Optimization Score, net saved)
+ *  appended to the "See your numbers" submenu. */
+function awarenessItems(): MenuItemConstructorOptions[] {
+  const results = runHabitDetectors(buildHabitInput());
+  const byId = new Map(results.map((r) => [r.id, r]));
+  const giantPasteCount = byId.get('giant-paste')?.count ?? 0;
+  const staleCacheIdleCount = byId.get('stale-cache-idle')?.count ?? 0;
+  const score = optimizationScore({
+    snapshot: liveDailySnapshot(),
+    toolingState,
+    giantPasteCount,
+    staleCacheIdleCount,
+  });
+  const lifetime = analyticsStore ? analyticsStore.data.savings.lifetimeUSD : 0;
+
+  const items: MenuItemConstructorOptions[] = [{ type: 'separator' }];
+  const modelSplit = byId.get('model-split');
+  const cacheRate = byId.get('cache-rate');
+  if (modelSplit) items.push({ label: modelSplit.coachCopy, enabled: false });
+  if (cacheRate) items.push({ label: cacheRate.coachCopy, enabled: false });
+  items.push({ label: `Optimization Score: ${score}/100`, enabled: false });
+  items.push({
+    label: `Net saved (lifetime): $${lifetime.toFixed(2)}`,
+    enabled: false,
+  });
+  return items;
+}
+
 function rebuildTrayMenu(): void {
   if (!tray) return;
   const s = latestSnapshot;
@@ -202,18 +439,39 @@ function rebuildTrayMenu(): void {
     );
   }
 
+  // The shown cost is already net (RTK compression lowered real token cost);
+  // "(net)" makes clear we are NOT subtracting savings again. The headline
+  // saved figure is TODAY's (matches "Today (net)"); lifetime lives in the
+  // savings drawer. `≈` marks an estimated (Caveman/Ponytail) contribution.
+  const todaySaved = daySavings(dayKey(new Date()));
+
   template.push(
-    { label: `Today: $${s.totalCostUSD.toFixed(2)}`, enabled: false },
+    { label: `Today (net): $${s.totalCostUSD.toFixed(2)}`, enabled: false },
     {
-      label: `Tokens today: ${s.inputTokens} in / ${s.outputTokens} out`,
+      label: `Saved today ${todaySaved.hasEstimate ? '≈ ' : ''}$${todaySaved.total.toFixed(2)}`,
+      enabled: false,
+    },
+    {
+      label: `Tokens today: ${formatTokens(s.inputTokens)} in / ${formatTokens(s.outputTokens)} out`,
       enabled: false,
     },
     { type: 'separator' },
     {
       label: 'See your numbers',
-      submenu: wealthSubmenu(s.totalCostUSD),
+      submenu: [...wealthSubmenu(s.totalCostUSD), ...awarenessItems()],
     },
     { label: 'Past spending', submenu: RANGES.map(historyMenuItem) }
+  );
+
+  const dayHabit = habitOfTheDay(runHabitDetectors(buildHabitInput()));
+  const anyMissing = TOOL_IDS.some((id) => !toolingState[id].installed);
+  template.push({ type: 'separator' }, optimizeMenuItem(anyMissing));
+  template.push(
+    {
+      label: dayHabit ? `${dayHabit.coachCopy}` : 'Habit of the day',
+      enabled: false,
+    },
+    { label: 'Your habits', submenu: habitsSubmenu() }
   );
 
   if (leaderboard) {
@@ -247,9 +505,14 @@ function rebuildTrayMenu(): void {
     {
       label: 'Test animations',
       submenu: [
-        { label: 'Stack of Money: $10', click: () => stacksFromTray(1) },
-        { label: 'Five Stacks: $50', click: () => stacksFromTray(5) },
-        { label: 'Make It Rain: $100', click: () => rainAllDisplays() },
+        // Pure single-animation previews (no mixed spend+save) — the real
+        // down-then-up choreography is wired in onUpdate at actual milestones.
+        { label: 'Spend: $10 stack', click: () => stacksFromTray(1, 'spend') },
+        { label: 'Spend: $50 stacks', click: () => stacksFromTray(5, 'spend') },
+        { label: 'Spend: $100 rain', click: () => rainAllDisplays('spend') },
+        { type: 'separator' },
+        { label: 'Saved: $10 stack', click: () => stacksFromTray(1, 'save') },
+        { label: 'Saved: $50 stacks', click: () => stacksFromTray(5, 'save') },
       ],
     },
     {
@@ -342,6 +605,229 @@ function runUpdate(): void {
     notify('Make It Rain', `Updated to v${target}. Quit and restart to apply.`);
     rebuildTrayMenu();
   });
+}
+
+/**
+ * Refresh toolingState from the real detect commands and persist it. Never
+ * throws — detectTooling's individual detectors are already best-effort.
+ */
+async function refreshToolingState(): Promise<void> {
+  const detected = await detectTooling(realCommandRunner);
+  const now = Date.now();
+  toolingState = {
+    rtk: { ...detected.rtk, detectedAtMs: now },
+    caveman: { ...detected.caveman, detectedAtMs: now },
+    ponytail: { ...detected.ponytail, detectedAtMs: now },
+  };
+  if (analyticsStore) {
+    for (const id of TOOL_IDS)
+      analyticsStore.setToolingState(id, toolingState[id]);
+  }
+}
+
+/**
+ * Re-check RTK's `rtk gain` savings and fold it into the running lifetime
+ * total. RTK reports an authoritative TOKEN count (summary.total_saved),
+ * priced conservatively at input rate in parseRtkGainJson — it is not a raw
+ * dollar figure. Best-effort: a parse/exec failure just leaves the lifetime
+ * total unchanged rather than fabricating a number.
+ */
+async function refreshSavingsFromRtk(): Promise<void> {
+  if (!analyticsStore) return;
+  if (toolingState.rtk.installed) {
+    const json = await fetchRtkGainJson(realCommandRunner);
+    rtkDailySavings = parseRtkDailySavings(json, pricingForModel);
+    const parsed = parseRtkGainJson(json, pricingForModel);
+    if (parsed) previousRtkLifetimeReal = Math.max(0, parsed.savedUSD);
+  } else {
+    rtkDailySavings = {};
+    previousRtkLifetimeReal = 0;
+  }
+
+  // Lifetime = RTK's authoritative real total (floor) + the accumulated
+  // estimated Caveman/Ponytail portion across stored days, clamped so lifetime
+  // saved can never exceed lifetime spend. Never decreases (max with stored).
+  let estPortion = 0;
+  let lifetimeSpend = 0;
+  for (const [date, snap] of Object.entries(
+    analyticsStore.data.dailySnapshots
+  )) {
+    lifetimeSpend += snap.costUSD;
+    const d = estimateDailyToolSavings({
+      snapshot: snap,
+      toolingState,
+      rtkRealUSD: rtkDailySavings[date] || 0,
+      pricingForModelFn: pricingForModel,
+    });
+    estPortion += d.cavemanEst + d.ponytailEst;
+  }
+  const capped = Math.min(previousRtkLifetimeReal + estPortion, lifetimeSpend);
+  const lifetime = Math.max(analyticsStore.data.savings.lifetimeUSD, capped);
+  analyticsStore.setSavings({
+    lifetimeUSD: lifetime,
+    lastReportedUSD: analyticsStore.data.savings.lastReportedUSD,
+  });
+
+  // Reuse the same whole-dollar crossing math as the red spend side (see
+  // lib/milestones.ts's dollarsCrossed) so a growing lifetime saving fires
+  // its own green dollar-up flies, on the display holding the tray anchor.
+  const dollarsGained = dollarsCrossed(previousSavingsUSD, lifetime);
+  if (dollarsGained > 0) flyBillsFromTray(dollarsGained, 'save');
+  previousSavingsUSD = lifetime;
+}
+
+/** Best-effort daily version-outdated check. Only RTK-via-brew exposes a clean
+ *  signal (`brew outdated rtk`, exit 0 + non-empty = outdated); plugins have no
+ *  clean `outdated` command, so we don't fake one. Fail-silent → "current". */
+async function refreshToolingOutdated(): Promise<void> {
+  if (!toolingState.rtk.installed) {
+    toolingUpdateAvailable = false;
+    return;
+  }
+  const [cmd, args] = TOOL_COMMANDS.rtk.outdated;
+  const r = await realCommandRunner(cmd, args);
+  toolingUpdateAvailable = r.code === 0 && /rtk/.test(r.stdout);
+}
+
+/** Savings for one day: real RTK (daily map) + estimated Caveman/Ponytail,
+ *  using the day's stored snapshot (or today's live one). */
+function daySavings(dateKey: string): DayToolSavings {
+  const todayKey = dayKey(new Date());
+  // Past dates read their stored snapshot; with no store there is no history,
+  // so fall back to an empty day (NOT today's live snapshot — that would
+  // credit a past date with today's numbers).
+  const snapshot: DailySnapshot =
+    dateKey === todayKey
+      ? liveDailySnapshot()
+      : analyticsStore
+        ? analyticsStore.getDay(dateKey)
+        : emptyDailySnapshot();
+  return estimateDailyToolSavings({
+    snapshot,
+    toolingState,
+    rtkRealUSD: rtkDailySavings[dateKey] || 0,
+    pricingForModelFn: pricingForModel,
+  });
+}
+
+/**
+ * "⚡ Optimize your spend…" — the confirm-sheet-driven installer. Native
+ * dialog.showMessageBox IS the transparent confirm sheet (no custom modal
+ * window exists in this app); its `detail` text lists every command that will
+ * run verbatim ("Show commands" disclosure), and every argv handed to
+ * execFile is a static literal from lib/tooling.ts — never built from user
+ * input. On success: re-detect tooling, persist an optimizeMilestone, and
+ * fire the first green 💵💚 as the reward.
+ */
+async function runOptimize(): Promise<void> {
+  if (optimizeInProgress) return;
+  const missing = TOOL_IDS.filter((id) => !toolingState[id].installed);
+
+  if (missing.length === 0) {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Make It Rain — Optimize',
+      message: 'Everything is already installed.',
+      detail: TOOL_IDS.map(
+        (id) => `${TOOL_LABELS[id]}: ${toolingState[id].version || 'installed'}`
+      ).join('\n'),
+    });
+    return;
+  }
+
+  const steps = await installPlan(missing, realCommandRunner);
+  const commandsPreview = steps
+    .map((s) => `${s.label}: ${s.argv.join(' ')}`)
+    .join('\n');
+
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Cancel', 'Install'],
+    defaultId: 1,
+    cancelId: 0,
+    title: 'Make It Rain — Optimize',
+    message: `Install ${missing.map((id) => TOOL_LABELS[id]).join(', ')}?`,
+    detail: `This runs the following official commands on your machine — nothing else:\n\n${commandsPreview}`,
+  });
+  if (response !== 1) return;
+
+  optimizeInProgress = true;
+  rebuildTrayMenu();
+
+  try {
+    const baselineCostRate = latestSnapshot.totalCostUSD;
+    const results = await runInstallPlan(steps, realCommandRunner);
+    const allOk = results.every((r) => r.ok);
+
+    await refreshToolingState();
+    if (analyticsStore) {
+      analyticsStore.addOptimizeMilestone({
+        atMs: Date.now(),
+        tools: missing,
+        baselineCostRate,
+      });
+    }
+    await refreshSavingsFromRtk();
+
+    if (allOk) {
+      notify('Make It Rain', 'Optimize complete — tooling installed.');
+      flyBillsFromTray(1, 'save'); // the reward: first green 💵⬆️
+    } else {
+      notify('Make It Rain', 'Optimize finished with some steps failing.');
+    }
+  } catch (err) {
+    notify('Make It Rain', 'Optimize failed to run.');
+    console.warn('MakeItRain: optimize failed:', (err as Error).message);
+  } finally {
+    optimizeInProgress = false;
+    rebuildTrayMenu();
+  }
+}
+
+/**
+ * "⚡ Update your tools (new version)" — RTK is the only tool with a clean
+ * update signal (brew), so it's the only one this runs. Same confirm-sheet
+ * transparency pattern as runOptimize: the exact command is shown verbatim in
+ * `detail` before anything executes. Fail-silent, never throws.
+ */
+async function runToolUpdate(): Promise<void> {
+  if (toolingUpdateInProgress) return;
+
+  const [cmd, args] = TOOL_COMMANDS.rtk.upgrade;
+  const commandPreview = `${TOOL_LABELS.rtk}: ${[cmd, ...args].join(' ')}`;
+
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Cancel', 'Update'],
+    defaultId: 1,
+    cancelId: 0,
+    title: 'Make It Rain — Optimize',
+    message: `Update ${TOOL_LABELS.rtk}?`,
+    detail: `This runs the following official command on your machine — nothing else:\n\n${commandPreview}`,
+  });
+  if (response !== 1) return;
+
+  toolingUpdateInProgress = true;
+  rebuildTrayMenu();
+
+  try {
+    const result = await realCommandRunner(cmd, args);
+    await refreshToolingState();
+    await refreshToolingOutdated();
+    await refreshSavingsFromRtk();
+
+    if (result.code === 0) {
+      notify('Make It Rain', 'RTK updated.');
+    } else {
+      notify('Make It Rain', 'RTK update finished with errors.');
+    }
+  } catch (err) {
+    notify('Make It Rain', 'RTK update failed to run.');
+    console.warn('MakeItRain: tool update failed:', (err as Error).message);
+  } finally {
+    toolingUpdateInProgress = false;
+    rebuildTrayMenu();
+  }
 }
 
 function setMuted(muted: boolean): void {
@@ -492,13 +978,18 @@ function flushOverlay(entry: OverlayEntry): void {
   }
 }
 
+type Variant = 'spend' | 'save';
+
 // Rain plays everywhere, but the coin shimmer plays only on the primary
 // display — otherwise every overlay would layer the same sound simultaneously.
-function rainAllDisplays(): void {
+// variant: 'spend' (default, red — every $100 spent) | 'save' (green — used
+// as the closer after a spend-triggered rain to show savings, never on its
+// own).
+function rainAllDisplays(variant: Variant = 'spend'): void {
   ensureOverlays();
   const primaryId = screen.getPrimaryDisplay().id;
   for (const [displayId, entry] of overlays.entries()) {
-    queueToOverlay(entry, 'rain', { sound: displayId === primaryId });
+    queueToOverlay(entry, 'rain', { sound: displayId === primaryId, variant });
   }
 }
 
@@ -524,15 +1015,15 @@ function trayDisplayTarget(): { entry: OverlayEntry; anchor: Rectangle } {
 }
 
 // Dollar-fly plays on whichever display holds the tray anchor.
-function flyBillsFromTray(count: number): void {
+function flyBillsFromTray(count: number, variant: Variant = 'spend'): void {
   const { entry, anchor } = trayDisplayTarget();
-  queueToOverlay(entry, 'fly-bills', { count, anchor });
+  queueToOverlay(entry, 'fly-bills', { count, anchor, variant });
 }
 
 // Milestone stacks ($10/$50) burst from the tray anchor on its display.
-function stacksFromTray(count: number): void {
+function stacksFromTray(count: number, variant: Variant = 'spend'): void {
   const { entry, anchor } = trayDisplayTarget();
-  queueToOverlay(entry, 'stack', { count, anchor });
+  queueToOverlay(entry, 'stack', { count, anchor, variant });
 }
 
 // A renderer reports it went idle; hide only that window (if nothing's queued).
@@ -589,17 +1080,49 @@ function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   // time today's total crosses the threshold. The thresholds/counts and the
   // crossing rules (midnight reset for free, highest-only on multi-cross)
   // live in lib/milestones.ts. Skipped on the initial scan (see above).
+  //
+  // Choreography (per the release plan): red spend-stack first, THEN — once
+  // it lands — a green savings-stack showing the running lifetime savings
+  // total, so a spend milestone always closes on "but here's what you saved".
   if (!isInitialScan) {
     const stackCount = stackCountForCrossing(previousTotal, newTotal);
     if (stackCount > 0) {
-      stacksFromTray(stackCount);
+      stacksFromTray(stackCount, 'spend');
+      scheduleSavingsFollowUp();
     }
   }
 
-  // $100-rain: trigger if we crossed at least one multiple of 100.
+  // $100-rain: trigger if we crossed at least one multiple of 100. Full red
+  // spend rain (all 💵🔻) first, THEN the green savings reinforcement as the
+  // closer once the first rain has cleared (rain runs ~6s in the overlay) — so
+  // a $100 milestone shows both the money gone and the money saved back.
   if (crossedHundred(previousTotal, newTotal)) {
-    rainAllDisplays();
+    rainAllDisplays('spend');
+    scheduleSavingsFollowUp(6200);
   }
+}
+
+/** The green "here's what you saved" reinforcement that closes a spend
+ *  milestone. Mirrors spend magnitude off TODAY's tool savings (matches the
+ *  "Saved today" tray line): nothing under $1, dollar-flies at $1–$9, stacks
+ *  ($10 each, capped at 5) from $10 up. Never an empty gesture. */
+function playSavingsReinforcement(): void {
+  const saved = daySavings(dayKey(new Date())).total;
+  if (saved < 1) return; // under $1 — show nothing
+  if (saved < 10) {
+    flyBillsFromTray(Math.floor(saved), 'save'); // $1–$9 — that many green bills
+    return;
+  }
+  const stacks = Math.max(1, Math.min(5, Math.floor(saved / 10)));
+  stacksFromTray(stacks, 'save'); // $10+ — one green stack per $10
+}
+
+/** Schedules the savings reinforcement after `delayMs` (default: just after the
+ *  preceding red stack lands), but ONLY when there is at least $1 saved today —
+ *  green never plays on a sub-dollar (or zero) saving. */
+function scheduleSavingsFollowUp(delayMs = 900): void {
+  if (daySavings(dayKey(new Date())).total < 1) return;
+  setTimeout(playSavingsReinforcement, delayMs);
 }
 
 // ── Past-spending history ─────────────────────────────────────────────────────
@@ -654,6 +1177,32 @@ if (!app.requestSingleInstanceLock()) {
       ses.setDevicePermissionHandler(() => false);
 
     config = new Config(path.join(app.getPath('userData'), 'config.json'));
+    // Separate, versioned analytics.json store (see lib/analytics-store.ts) —
+    // NOT the shared config.json — for per-day rollups, tooling state, and
+    // the running net-savings total that drives the green celebration + the
+    // one savedUSD KPI reported to the collective board.
+    analyticsStore = new AnalyticsStore(
+      path.join(app.getPath('userData'), 'analytics.json')
+    );
+    toolingState = analyticsStore.data.toolingState;
+    previousSavingsUSD = analyticsStore.data.savings.lifetimeUSD;
+    // Re-detect in the background at launch so a relaunch after installing a
+    // tool outside the app (or the very first launch) reflects reality.
+    refreshToolingState()
+      .then(() => refreshSavingsFromRtk())
+      .then(() => refreshToolingOutdated())
+      .then(() => rebuildTrayMenu())
+      .catch((err: Error) =>
+        console.warn(
+          'MakeItRain: initial tooling detection failed:',
+          err.message
+        )
+      );
+    const toolingOutdatedTimer = setInterval(
+      () => refreshToolingOutdated().then(() => rebuildTrayMenu()),
+      DAILY_TOOLING_CHECK_MS
+    );
+    if (toolingOutdatedTimer.unref) toolingOutdatedTimer.unref();
 
     tray = new Tray(getTrayIcon());
     applySnapshot(latestSnapshot);
@@ -681,6 +1230,10 @@ if (!app.requestSingleInstanceLock()) {
     leaderboard = new LeaderboardClient({
       configDir: app.getPath('userData'),
       getTotal: () => latestSnapshot.totalCostUSD,
+      // Today's tool savings (matches the board's per-day spend figure), NOT
+      // lifetime — the board is a daily snapshot.
+      getSavedUSD: () => daySavings(dayKey(new Date())).total,
+      getOptimized: () => TOOL_IDS.every((id) => toolingState[id].installed),
       apiBaseUrlOverride: process.env.MIR_API_BASE_URL,
       onConfigChange: () => {
         if (tray) rebuildTrayMenu();
@@ -700,7 +1253,7 @@ if (!app.requestSingleInstanceLock()) {
 
     // Retroactive spend history (reads existing logs; no database). The
     // periodic force refresh is cheap: it only rescans files touched today.
-    history = new History({ cacheTtlMs: HISTORY_REFRESH_MS });
+    history = new History({ cacheTtlMs: HISTORY_REFRESH_MS, analyticsStore });
     refreshHistory();
     const historyTimer = setInterval(
       () => refreshHistory({ force: true }),
@@ -710,16 +1263,20 @@ if (!app.requestSingleInstanceLock()) {
 
     // Launch hooks for testing without clicking the menu:
     //   MIR_TEST_RAIN=1  triggers the rain animation after 1.5s
+    //   MIR_TEST_SAVE_RAIN=1  triggers the GREEN savings rain after 1.5s
     //   MIR_TEST_STACK=<n>  bursts <n> milestone money stacks after 3s (so the
     //                       4s MIR_TEST_SHOT below catches them mid-fall)
     //   MIR_TEST_SHOT=/path.png  captures the overlay to a PNG a few seconds later
     if (process.env.MIR_TEST_RAIN === '1') {
-      setTimeout(() => rainAllDisplays(), 1500);
+      setTimeout(() => rainAllDisplays('spend'), 1500);
+    }
+    if (process.env.MIR_TEST_SAVE_RAIN === '1') {
+      setTimeout(() => rainAllDisplays('save'), 1500);
     }
     const stackEnv = process.env.MIR_TEST_STACK;
     if (stackEnv) {
       const n = parseInt(stackEnv, 10) || 1;
-      setTimeout(() => stacksFromTray(n), 3000);
+      setTimeout(() => stacksFromTray(n, 'spend'), 3000);
     }
     const shotPath = process.env.MIR_TEST_SHOT;
     if (shotPath) {

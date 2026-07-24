@@ -15,57 +15,43 @@
 export interface Treat {
   singular: string;
   plural: string;
-  emoji: string;
   unitUSD: number;
 }
 
 export interface BigTicket {
   label: string;
   article: string;
-  emoji: string;
   unitUSD: number;
 }
 
 export interface TreatMatch {
   count: number;
   label: string;
-  emoji: string;
   text: string;
 }
 
 export interface BigTicketMatch {
-  emoji: string;
   text: string;
 }
 
 export const SMALL_TREATS: Treat[] = [
-  { singular: 'coffee', plural: 'coffees', emoji: '☕', unitUSD: 5 },
-  { singular: 'burger', plural: 'burgers', emoji: '🍔', unitUSD: 12 },
-  {
-    singular: 'movie ticket',
-    plural: 'movie tickets',
-    emoji: '🎟️',
-    unitUSD: 16,
-  },
-  { singular: 'pizza', plural: 'pizzas', emoji: '🍕', unitUSD: 22 },
-  { singular: 'video game', plural: 'video games', emoji: '🎮', unitUSD: 60 },
-  { singular: 'night out', plural: 'nights out', emoji: '🎉', unitUSD: 120 },
+  { singular: 'coffee', plural: 'coffees', unitUSD: 5 },
+  { singular: 'burger', plural: 'burgers', unitUSD: 12 },
+  { singular: 'movie ticket', plural: 'movie tickets', unitUSD: 16 },
+  { singular: 'pizza', plural: 'pizzas', unitUSD: 22 },
+  { singular: 'video game', plural: 'video games', unitUSD: 60 },
+  { singular: 'night out', plural: 'nights out', unitUSD: 120 },
 ];
 
 export const BIG_TICKETS: BigTicket[] = [
-  { label: 'new iPhone', article: 'a', emoji: '📱', unitUSD: 1000 },
-  { label: 'weekend in Paris', article: 'a', emoji: '🥐', unitUSD: 1200 },
-  { label: 'trip to Greece', article: 'a', emoji: '🏛️', unitUSD: 2500 },
-  { label: 'used car', article: 'a', emoji: '🚗', unitUSD: 9000 },
-  { label: 'small house deposit', article: 'a', emoji: '🏠', unitUSD: 40000 },
-  { label: 'Tesla', article: 'a', emoji: '⚡', unitUSD: 45000 },
-  { label: 'Titanic', article: 'the', emoji: '🚢', unitUSD: 7_500_000 },
-  {
-    label: 'Burj Khalifa',
-    article: 'the',
-    emoji: '🏙️',
-    unitUSD: 1_500_000_000,
-  },
+  { label: 'new iPhone', article: 'a', unitUSD: 1000 },
+  { label: 'weekend in Paris', article: 'a', unitUSD: 1200 },
+  { label: 'trip to Greece', article: 'a', unitUSD: 2500 },
+  { label: 'used car', article: 'a', unitUSD: 9000 },
+  { label: 'small house deposit', article: 'a', unitUSD: 40000 },
+  { label: 'Tesla', article: 'a', unitUSD: 45000 },
+  { label: 'Titanic', article: 'the', unitUSD: 7_500_000 },
+  { label: 'Burj Khalifa', article: 'the', unitUSD: 1_500_000_000 },
 ];
 
 const TREAT_TARGET_COUNT = 3;
@@ -126,7 +112,6 @@ export function treats(
   return {
     count: bestCount,
     label,
-    emoji: best.emoji,
     text: `${bestCount} ${label}`,
   };
 }
@@ -153,12 +138,9 @@ export function bigTicketFraction(
   const name = `${reference.article} ${reference.label}`;
   if (usd >= reference.unitUSD) {
     const times = Math.round((usd / reference.unitUSD) * 10) / 10;
-    return { emoji: reference.emoji, text: `${times}× ${name}` };
+    return { text: `${times}× ${name}` };
   }
-  return {
-    emoji: reference.emoji,
-    text: `${pct(usd / reference.unitUSD)} of ${name}`,
-  };
+  return { text: `${pct(usd / reference.unitUSD)} of ${name}` };
 }
 
 export function bigTicketReached(
@@ -175,7 +157,7 @@ export function bigTicketReached(
   const name = `${reached.article} ${reached.label}`;
   const times = usd / reached.unitUSD;
   if (times >= 2) {
-    return { emoji: reached.emoji, text: `${Math.round(times)}× ${name}` };
+    return { text: `${Math.round(times)}× ${name}` };
   }
-  return { emoji: reached.emoji, text: name };
+  return { text: name };
 }
