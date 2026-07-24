@@ -94,6 +94,10 @@ export class LeaderboardDB {
 
     this.db = new Database(this.filePath, { create: true });
     this.db.exec('PRAGMA journal_mode = WAL;');
+    // NORMAL is durable under WAL except on OS crash/power loss (fine for an
+    // anonymized board) and avoids an fsync per commit — 150 sequential
+    // reports otherwise time out on Windows CI's slow fsync.
+    this.db.exec('PRAGMA synchronous = NORMAL;');
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS leaderboard (' +
         'day TEXT NOT NULL, ' +
