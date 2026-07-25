@@ -227,7 +227,7 @@ a { color: inherit; }
   min-width: 1ch;
 }
 .ghstar .count .star-ico { width: 13px; height: 13px; fill: var(--gold); }
-.ghstar .count.pending { opacity: 0; }
+.ghstar .count.pending #starNum { opacity: 0; }
 
 /* The top bar now holds two pills (About + Star); space them without letting the
    row lose its right alignment. */
@@ -239,6 +239,9 @@ a { color: inherit; }
    Native <dialog>. Full story ships in the HTML (indexable) and only becomes
    visible on open. Backdrop dims the page; the panel matches the surface cards. */
 dialog.about {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(640px, calc(100vw - 32px));
   max-height: min(84vh, 760px);
   padding: 0;

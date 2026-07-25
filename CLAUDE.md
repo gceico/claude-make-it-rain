@@ -3,7 +3,8 @@
 ## Overview
 
 Make It Rain is an Electron menu-bar/tray app that watches Claude Code usage
-logs (`~/.claude/projects/*/*.jsonl`) and shows the day's estimated spend, flying
+logs (`~/.claude/projects/*/*.jsonl`, plus each Cowork session's sandboxed
+`.claude/projects` — see `src/lib/projects-dirs.ts`) and shows the day's estimated spend, flying
 a 💵 off the tray every whole dollar and raining money at $100 milestones. It can
 optionally report an anonymized daily total (a random gamer tag + USD figure) to
 a cloud board that shows the **collective** spend as an hourly curve (not a

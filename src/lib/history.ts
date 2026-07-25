@@ -2,12 +2,16 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { costForEntry } from './pricing';
 import { parseUsageEntry } from './entry-parser';
 import { AnalyticsStore, emptyDailySnapshot } from './analytics-store';
 import type { DailySnapshot, ToolingState } from './analytics-store';
 import { runHabitDetectors } from './habits';
+import {
+  allProjectsDirs,
+  defaultProjectsDir,
+  resolveCoworkSessionsDir,
+} from './projects-dirs';
 
 /**
  * Retroactive spend history built directly from the ~/.claude/projects/**\/*.jsonl
@@ -141,43 +145,41 @@ export function billStacksLabel(costUSD: number): string {
   return `${n}×💰`;
 }
 
-/** All *.jsonl under projectsDir/<project>/ last modified at/after `since`.
+/** All *.jsonl under <root>/<project>/ last modified at/after `since`, across
+ * every projects root (CLI + Cowork sessions).
  * A file whose mtime predates the window cannot contain in-window entries, so
  * skipping it is a safe optimization; per-entry timestamps still gate results. */
-async function discoverFiles(
-  projectsDir: string,
-  since: Date
-): Promise<string[]> {
-  let projectDirs: fs.Dirent[];
-  try {
-    projectDirs = await fs.promises.readdir(projectsDir, {
-      withFileTypes: true,
-    });
-  } catch {
-    return [];
-  }
-
+async function discoverFiles(roots: string[], since: Date): Promise<string[]> {
   const sinceMs = since.getTime();
   const result: string[] = [];
-  for (const dirent of projectDirs) {
-    if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
-    const projectDir = path.join(projectsDir, dirent.name);
-    let files: string[];
+  for (const root of roots) {
+    let projectDirs: fs.Dirent[];
     try {
-      files = await fs.promises.readdir(projectDir);
+      projectDirs = await fs.promises.readdir(root, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const name of files) {
-      if (!name.endsWith('.jsonl')) continue;
-      const filePath = path.join(projectDir, name);
-      let stat: fs.Stats;
+
+    for (const dirent of projectDirs) {
+      if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
+      const projectDir = path.join(root, dirent.name);
+      let files: string[];
       try {
-        stat = await fs.promises.stat(filePath);
+        files = await fs.promises.readdir(projectDir);
       } catch {
         continue;
       }
-      if (stat.mtimeMs >= sinceMs) result.push(filePath);
+      for (const name of files) {
+        if (!name.endsWith('.jsonl')) continue;
+        const filePath = path.join(projectDir, name);
+        let stat: fs.Stats;
+        try {
+          stat = await fs.promises.stat(filePath);
+        } catch {
+          continue;
+        }
+        if (stat.mtimeMs >= sinceMs) result.push(filePath);
+      }
     }
   }
   return result;
@@ -185,6 +187,7 @@ async function discoverFiles(
 
 interface ScanWindowArgs {
   projectsDir: string;
+  coworkSessionsDir?: string | null;
   startMs: number;
   endMs: number;
   baseSeen?: Set<string> | null;
@@ -203,11 +206,15 @@ interface ScanWindowArgs {
  */
 async function scanWindow({
   projectsDir,
+  coworkSessionsDir = null,
   startMs,
   endMs,
   baseSeen = null,
 }: ScanWindowArgs): Promise<ScanResult> {
-  const files = await discoverFiles(projectsDir, new Date(startMs));
+  const files = await discoverFiles(
+    allProjectsDirs(projectsDir, coworkSessionsDir),
+    new Date(startMs)
+  );
   const seen = new Set<string>();
   const days = new Map<string, DayBucket>(); // dayKey -> DayBucket
   let totalCostUSD = 0;
@@ -342,6 +349,7 @@ function dailySnapshotFromBucket(bucket: DayBucket): DailySnapshot {
 
 interface ScanRangeArgs {
   projectsDir: string;
+  coworkSessionsDir?: string | null;
   rangeId: string;
   now?: Date;
 }
@@ -354,12 +362,14 @@ interface ScanRangeArgs {
  */
 export async function scanRange({
   projectsDir,
+  coworkSessionsDir = null,
   rangeId,
   now = new Date(),
 }: ScanRangeArgs): Promise<RangeResult> {
   const range = rangeFor(rangeId, now);
   const { days, totalCostUSD, entryCount } = await scanWindow({
     projectsDir,
+    coworkSessionsDir,
     startMs: range.start.getTime(),
     endMs: range.end.getTime(),
   });
@@ -394,6 +404,8 @@ interface TodayEntry {
 
 export interface HistoryOptions {
   projectsDir?: string;
+  /** Cowork sessions root; `null` skips Cowork. See resolveCoworkSessionsDir. */
+  coworkSessionsDir?: string | null;
   cacheTtlMs?: number;
   /** Optional analytics store to persist finished (immutable) ledger days
    *  into, so daily snapshots survive relaunch and past months even if
@@ -424,6 +436,7 @@ export interface HistoryOptions {
  */
 export class History {
   projectsDir: string;
+  coworkSessionsDir: string | null;
   cacheTtlMs: number;
   _cache: Map<string, CacheEntry>;
   _ledger: LedgerEntry | null;
@@ -432,11 +445,15 @@ export class History {
 
   constructor({
     projectsDir,
+    coworkSessionsDir,
     cacheTtlMs = 60_000,
     analyticsStore = null,
   }: HistoryOptions = {}) {
-    this.projectsDir =
-      projectsDir || path.join(os.homedir(), '.claude', 'projects');
+    this.projectsDir = projectsDir || defaultProjectsDir();
+    this.coworkSessionsDir = resolveCoworkSessionsDir(
+      projectsDir,
+      coworkSessionsDir
+    );
     this.cacheTtlMs = cacheTtlMs;
     this._cache = new Map(); // rangeId -> { at, dayStartMs, promise }
     this._ledger = null; // { promise, dayStartMs, startMs }
@@ -463,6 +480,7 @@ export class History {
 
     const promise = scanWindow({
       projectsDir: this.projectsDir,
+      coworkSessionsDir: this.coworkSessionsDir,
       startMs,
       endMs: dayStartMs,
     })
@@ -515,6 +533,7 @@ export class History {
       .then((ledger) =>
         scanWindow({
           projectsDir: this.projectsDir,
+          coworkSessionsDir: this.coworkSessionsDir,
           startMs: dayStartMs,
           endMs: addDays(new Date(dayStartMs), 1).getTime(),
           baseSeen: ledger.seenKeys,

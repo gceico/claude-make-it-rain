@@ -2,9 +2,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { costForEntry } from './pricing';
 import { parseUsageEntry } from './entry-parser';
+import {
+  allProjectsDirs,
+  defaultProjectsDir,
+  resolveCoworkSessionsDir,
+} from './projects-dirs';
 
 /** Per-model running totals within a Snapshot. */
 export interface ModelBucket {
@@ -59,6 +63,9 @@ export interface Snapshot {
 
 export interface UsageMonitorOptions {
   projectsDir?: string;
+  /** Cowork sessions root; `null` skips Cowork. Defaults to the real one only
+   *  when `projectsDir` is left at its default (see resolveCoworkSessionsDir). */
+  coworkSessionsDir?: string | null;
   pollMs?: number;
 }
 
@@ -71,6 +78,7 @@ export interface UsageMonitorOptions {
  */
 export class UsageMonitor {
   projectsDir: string;
+  coworkSessionsDir: string | null;
   pollMs: number;
 
   /** Called whenever the running total changes: (previousTotal, snapshot). */
@@ -87,9 +95,16 @@ export class UsageMonitor {
   // sessionId -> last assistant timestamp seen today (for gap detection).
   sessionLastTs!: Map<string, number>;
 
-  constructor({ projectsDir, pollMs = 3000 }: UsageMonitorOptions = {}) {
-    this.projectsDir =
-      projectsDir || path.join(os.homedir(), '.claude', 'projects');
+  constructor({
+    projectsDir,
+    coworkSessionsDir,
+    pollMs = 3000,
+  }: UsageMonitorOptions = {}) {
+    this.projectsDir = projectsDir || defaultProjectsDir();
+    this.coworkSessionsDir = resolveCoworkSessionsDir(
+      projectsDir,
+      coworkSessionsDir
+    );
     this.pollMs = pollMs;
 
     this.onUpdate = null;
@@ -162,36 +177,42 @@ export class UsageMonitor {
     }
   }
 
-  /** All *.jsonl under projectsDir/<project>/ modified since local day start. */
+  /** All *.jsonl under every projects root (CLI + Cowork sessions), modified
+   *  since local day start. */
   discoverCandidateFiles(): string[] {
-    let projectDirs: fs.Dirent[];
-    try {
-      projectDirs = fs.readdirSync(this.projectsDir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-
     const result: string[] = [];
-    for (const dirent of projectDirs) {
-      if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
-      const projectDir = path.join(this.projectsDir, dirent.name);
-      let files: string[];
+    for (const root of allProjectsDirs(
+      this.projectsDir,
+      this.coworkSessionsDir
+    )) {
+      let projectDirs: fs.Dirent[];
       try {
-        files = fs.readdirSync(projectDir);
+        projectDirs = fs.readdirSync(root, { withFileTypes: true });
       } catch {
         continue;
       }
-      for (const name of files) {
-        if (!name.endsWith('.jsonl')) continue;
-        const filePath = path.join(projectDir, name);
-        let stat: fs.Stats;
+
+      for (const dirent of projectDirs) {
+        if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
+        const projectDir = path.join(root, dirent.name);
+        let files: string[];
         try {
-          stat = fs.statSync(filePath);
+          files = fs.readdirSync(projectDir);
         } catch {
           continue;
         }
-        if (stat.mtimeMs >= this.currentDayStart.getTime()) {
-          result.push(filePath);
+        for (const name of files) {
+          if (!name.endsWith('.jsonl')) continue;
+          const filePath = path.join(projectDir, name);
+          let stat: fs.Stats;
+          try {
+            stat = fs.statSync(filePath);
+          } catch {
+            continue;
+          }
+          if (stat.mtimeMs >= this.currentDayStart.getTime()) {
+            result.push(filePath);
+          }
         }
       }
     }

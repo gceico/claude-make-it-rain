@@ -71,6 +71,10 @@ test('pricing model coverage + cost math', () => {
     inputPerMillion: 10,
     outputPerMillion: 50,
   });
+  assert.deepStrictEqual(pricingForModel('claude-opus-5'), {
+    inputPerMillion: 5,
+    outputPerMillion: 25,
+  });
   assert.deepStrictEqual(pricingForModel('claude-opus-4-8'), {
     inputPerMillion: 5,
     outputPerMillion: 25,
@@ -606,6 +610,78 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
   assert.ok(fired.has('rage-retry'), 'rage-retry fires live');
   assert.ok(fired.has('long-sessions'), 'long-sessions fires live');
   assert.ok(fired.has('stale-cache-idle'), 'stale-cache-idle fires live');
+});
+
+// ── Cowork (Claude Desktop local agent mode) sandboxed HOMEs ───────────────
+test('counts Cowork session transcripts alongside the CLI ones', () => {
+  const cliProjects = path.join(tmpRoot, 'cowork-cli', 'projects');
+  const cliProject = path.join(cliProjects, 'proj');
+  fs.mkdirSync(cliProject, { recursive: true });
+  fs.writeFileSync(
+    path.join(cliProject, 's.jsonl'),
+    entry({
+      ts: todayISO,
+      model: 'claude-sonnet-5',
+      reqId: 'cw-cli',
+      msgId: 'cw-cli',
+      input: 0,
+      output: 100_000,
+    }) + '\n' // $1.50
+  );
+
+  // <sessions>/<account>/<org>/<session>/.claude/projects/<project>/*.jsonl
+  const sessionsDir = path.join(tmpRoot, 'cowork-sessions');
+  const coworkProject = path.join(
+    sessionsDir,
+    'account',
+    'org',
+    'local_abc',
+    '.claude',
+    'projects',
+    'sandboxed-proj'
+  );
+  fs.mkdirSync(coworkProject, { recursive: true });
+  fs.writeFileSync(
+    path.join(coworkProject, 't.jsonl'),
+    entry({
+      ts: todayISO,
+      model: 'claude-sonnet-5',
+      reqId: 'cw-agent',
+      msgId: 'cw-agent',
+      input: 0,
+      output: 200_000,
+    }) + '\n' // $3.00
+  );
+  // A checked-out repo inside the session HOME must not be scanned.
+  const stray = path.join(sessionsDir, 'account', 'org', 'local_abc', 'repo');
+  fs.mkdirSync(stray, { recursive: true });
+  fs.writeFileSync(
+    path.join(stray, 'nope.jsonl'),
+    entry({
+      ts: todayISO,
+      model: 'claude-sonnet-5',
+      reqId: 'cw-stray',
+      msgId: 'cw-stray',
+      input: 0,
+      output: 999_999,
+    }) + '\n'
+  );
+
+  const m = new UsageMonitor({
+    projectsDir: cliProjects,
+    coworkSessionsDir: sessionsDir,
+  });
+  m.tick(true);
+  assert.strictEqual(m.snapshot.entryCount, 2);
+  assert.ok(
+    Math.abs(m.snapshot.totalCostUSD - 4.5) < 1e-9,
+    `expected $4.50, got ${m.snapshot.totalCostUSD}`
+  );
+
+  // An explicit projectsDir with no cowork root stays CLI-only.
+  const cliOnly = new UsageMonitor({ projectsDir: cliProjects });
+  cliOnly.tick(true);
+  assert.strictEqual(cliOnly.snapshot.entryCount, 1);
 });
 
 afterAll(() => {

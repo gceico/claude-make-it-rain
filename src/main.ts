@@ -632,7 +632,9 @@ async function refreshToolingState(): Promise<void> {
  * dollar figure. Best-effort: a parse/exec failure just leaves the lifetime
  * total unchanged rather than fabricating a number.
  */
-async function refreshSavingsFromRtk(): Promise<void> {
+async function refreshSavingsFromRtk({
+  animate = true,
+}: { animate?: boolean } = {}): Promise<void> {
   if (!analyticsStore) return;
   if (toolingState.rtk.installed) {
     const json = await fetchRtkGainJson(realCommandRunner);
@@ -671,8 +673,11 @@ async function refreshSavingsFromRtk(): Promise<void> {
   // Reuse the same whole-dollar crossing math as the red spend side (see
   // lib/milestones.ts's dollarsCrossed) so a growing lifetime saving fires
   // its own green dollar-up flies, on the display holding the tray anchor.
+  // The launch call passes animate:false: on a first run (stored lifetime $0)
+  // RTK's whole existing savings total would otherwise fly as green bills at
+  // startup. Startup only seeds the baseline.
   const dollarsGained = dollarsCrossed(previousSavingsUSD, lifetime);
-  if (dollarsGained > 0) flyBillsFromTray(dollarsGained, 'save');
+  if (animate && dollarsGained > 0) flyBillsFromTray(dollarsGained, 'save');
   previousSavingsUSD = lifetime;
 }
 
@@ -1064,11 +1069,12 @@ function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   const newTotal = snapshot.totalCostUSD;
 
   // The very first onUpdate after start() is the initial scan: it jumps from $0
-  // to today's already-accumulated total. We suppress the new milestone stacks
-  // there so launching the app never replays the whole day's big celebrations.
-  // (Per-dollar fly-bills and the $100 rain keep their prior behavior unchanged.)
+  // to today's already-accumulated total. Nothing animates there — launching the
+  // app must never replay the day's spend (bills, stacks, or rain); it only
+  // seeds the baseline that later real spend is measured against.
   const isInitialScan = !initialScanHandled;
   initialScanHandled = true;
+  if (isInitialScan) return;
 
   // Dollar-fly: number of whole-dollar boundaries crossed since the last update.
   const dollarsGained = dollarsCrossed(previousTotal, newTotal);
@@ -1079,17 +1085,15 @@ function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   // Milestone stacks ($10 → one 10-bill stack, $50 → five): fire the first
   // time today's total crosses the threshold. The thresholds/counts and the
   // crossing rules (midnight reset for free, highest-only on multi-cross)
-  // live in lib/milestones.ts. Skipped on the initial scan (see above).
+  // live in lib/milestones.ts.
   //
   // Choreography (per the release plan): red spend-stack first, THEN — once
   // it lands — a green savings-stack showing the running lifetime savings
   // total, so a spend milestone always closes on "but here's what you saved".
-  if (!isInitialScan) {
-    const stackCount = stackCountForCrossing(previousTotal, newTotal);
-    if (stackCount > 0) {
-      stacksFromTray(stackCount, 'spend');
-      scheduleSavingsFollowUp();
-    }
+  const stackCount = stackCountForCrossing(previousTotal, newTotal);
+  if (stackCount > 0) {
+    stacksFromTray(stackCount, 'spend');
+    scheduleSavingsFollowUp();
   }
 
   // $100-rain: trigger if we crossed at least one multiple of 100. Full red
@@ -1189,7 +1193,7 @@ if (!app.requestSingleInstanceLock()) {
     // Re-detect in the background at launch so a relaunch after installing a
     // tool outside the app (or the very first launch) reflects reality.
     refreshToolingState()
-      .then(() => refreshSavingsFromRtk())
+      .then(() => refreshSavingsFromRtk({ animate: false }))
       .then(() => refreshToolingOutdated())
       .then(() => rebuildTrayMenu())
       .catch((err: Error) =>
