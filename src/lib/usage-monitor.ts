@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { costForEntry } from './pricing';
 import { parseUsageEntry } from './entry-parser';
+import { tailFile } from './tail-reader';
 import {
   allProjectsDirs,
   defaultProjectsDir,
@@ -219,66 +220,15 @@ export class UsageMonitor {
     return result;
   }
 
-  /** Incrementally reads newly appended bytes and processes complete lines. */
+  /** Incrementally reads newly appended bytes and processes complete lines.
+   *  No `onTruncate` handler: dedup by requestId:messageId (seenKeys) makes a
+   *  full re-read after truncation safe on its own. */
   processFile(filePath: string): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(filePath);
-    } catch {
-      return;
-    }
-    const currentSize = stat.size;
-
-    let offset = this.fileOffsets.get(filePath) || 0;
-    if (currentSize < offset) {
-      // File shrank/truncated/rotated - reset.
-      offset = 0;
-      this.partialLines.delete(filePath);
-    }
-    if (currentSize <= offset) {
-      this.fileOffsets.set(filePath, offset);
-      return;
-    }
-
-    let fd: number;
-    try {
-      fd = fs.openSync(filePath, 'r');
-    } catch {
-      return;
-    }
-
-    let newData: Buffer | null;
-    try {
-      const toRead = currentSize - offset;
-      newData = Buffer.alloc(toRead);
-      const bytesRead = fs.readSync(fd, newData, 0, toRead, offset);
-      newData = newData.subarray(0, bytesRead);
-    } catch {
-      newData = null;
-    } finally {
-      fs.closeSync(fd);
-    }
-    if (!newData || newData.length === 0) return;
-
-    this.fileOffsets.set(filePath, offset + newData.length);
-
-    let buffer = this.partialLines.get(filePath) || Buffer.alloc(0);
-    buffer = Buffer.concat([buffer, newData]);
-
-    let searchStart = 0;
-    let nl: number;
-    while ((nl = buffer.indexOf(0x0a, searchStart)) !== -1) {
-      const line = buffer.subarray(searchStart, nl);
-      searchStart = nl + 1;
-      if (line.length > 0) this.processLine(line);
-    }
-    // Remaining partial line (no trailing newline yet).
-    const remainder = buffer.subarray(searchStart);
-    if (remainder.length > 0) {
-      this.partialLines.set(filePath, Buffer.from(remainder));
-    } else {
-      this.partialLines.delete(filePath);
-    }
+    tailFile(
+      filePath,
+      { offsets: this.fileOffsets, partials: this.partialLines },
+      (line) => this.processLine(line)
+    );
   }
 
   processLine(lineBuffer: Buffer): void {
