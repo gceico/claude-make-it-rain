@@ -88,14 +88,88 @@ export function pricingForModel(model: string | null | undefined): Pricing {
 }
 
 /**
+ * Per-1M-token USD pricing for OpenAI's Codex-family models (the model ids that
+ * appear in `~/.codex/sessions` rollout logs), substring-matched, first match
+ * wins. Cached input is billed by `costForEntry` at 10% of the input rate — the
+ * same cache-read treatment Codex's `cached_input_tokens` needs — so only
+ * input/output rates live here.
+ *
+ * Rates verified 2026-07 against the published OpenAI API pricing / the
+ * reference usage tools (ccusage's LiteLLM table). Order matters: the
+ * more-specific `-codex` / version-suffixed ids must precede the bare `gpt-5`.
+ */
+export function pricingForCodexModel(
+  model: string | null | undefined
+): Pricing {
+  const m = (model || '').toLowerCase();
+
+  // Codex-tuned models. gpt-5.3-codex is the pricier tier; gpt-5-codex and
+  // gpt-5.1-codex share the base codex rate.
+  if (m.includes('gpt-5.3-codex') || m.includes('gpt-5-3-codex')) {
+    return { inputPerMillion: 1.75, outputPerMillion: 14 };
+  }
+  if (m.includes('codex')) {
+    // Size tiers first: gpt-5.1-codex-mini bills at the mini rate, not the
+    // flagship one (a ~5x difference), and likewise for any -nano variant.
+    if (m.includes('nano'))
+      return { inputPerMillion: 0.05, outputPerMillion: 0.4 };
+    if (m.includes('mini'))
+      return { inputPerMillion: 0.25, outputPerMillion: 2 };
+    // gpt-5-codex / gpt-5.1-codex / future codex ids without their own tier.
+    return { inputPerMillion: 1.25, outputPerMillion: 10 };
+  }
+
+  // GPT-5.6 family (Sol / Terra / Luna), launched 2026-07.
+  if (m.includes('gpt-5.6') || m.includes('gpt-5-6')) {
+    if (m.includes('terra'))
+      return { inputPerMillion: 2.5, outputPerMillion: 15 };
+    if (m.includes('luna')) return { inputPerMillion: 1, outputPerMillion: 6 };
+    // Sol (flagship) and any unlabelled 5.6 id.
+    return { inputPerMillion: 5, outputPerMillion: 30 };
+  }
+
+  if (m.includes('gpt-5.5') || m.includes('gpt-5-5')) {
+    return { inputPerMillion: 5, outputPerMillion: 30 };
+  }
+
+  if (m.includes('gpt-5.4') || m.includes('gpt-5-4')) {
+    if (m.includes('nano'))
+      return { inputPerMillion: 0.2, outputPerMillion: 1.25 };
+    if (m.includes('mini'))
+      return { inputPerMillion: 0.75, outputPerMillion: 4.5 };
+    // Bare gpt-5.4 (full) — priced at the codex/base flagship tier.
+    return { inputPerMillion: 1.25, outputPerMillion: 10 };
+  }
+
+  if (m.includes('nano')) {
+    return { inputPerMillion: 0.05, outputPerMillion: 0.4 };
+  }
+  if (m.includes('mini')) {
+    return { inputPerMillion: 0.25, outputPerMillion: 2 };
+  }
+
+  // Bare gpt-5 (and the default for any unrecognised gpt-* / null id): the
+  // base flagship rate. As with the Claude table we over-count a brand-new
+  // model rather than let it vanish from the total; add it above when it ships.
+  return { inputPerMillion: 1.25, outputPerMillion: 10 };
+}
+
+/**
  * USD cost for a single usage entry.
  * Cache reads are 10% of the input rate; cache writes are 1.25x (5m) / 2x (1h).
+ *
+ * `pricing` selects the per-model rate table: it defaults to the Claude table
+ * (`pricingForModel`) so every existing caller is unchanged, and the Codex path
+ * passes `pricingForCodexModel`. The cache-read (10% of input) and cache-write
+ * math is provider-agnostic; Codex simply never supplies a cache-creation
+ * breakdown, so those terms are zero for it.
  */
 export function costForEntry(
   usage: Usage,
-  model: string | null | undefined
+  model: string | null | undefined,
+  pricing: (m: string | null | undefined) => Pricing = pricingForModel
 ): number {
-  const p = pricingForModel(model);
+  const p = pricing(model);
   const inRate = p.inputPerMillion;
   const outRate = p.outputPerMillion;
 

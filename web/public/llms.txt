@@ -1,6 +1,7 @@
 # Make It Rain (aiburn.dev)
 
-> Make It Rain is a menu-bar/tray app that turns Claude Code spend into a
+> Make It Rain is a menu-bar/tray app that turns the spend of your AI coding
+> agents (Claude Code, Codex, and the like) into a
 > visible, physical thing: a 💵 flies off the tray every dollar, and every
 > $100 makes it rain on screen. It also reports an anonymized daily total to
 > this site, which shows the collective spend of everyone running the app as
@@ -21,8 +22,8 @@ UTC midnight, plus a personal reflection view for any user via `?tag=<tag>`.
 - The board intentionally does not rank users by spend — ranking would
   reward spending more, the opposite of the app's point. It only shows the
   aggregate curve and each user's own total against the collective.
-- Dollar figures are estimates from Claude API list pricing, not actual
-  bills.
+- Dollar figures are estimates from each provider's API list pricing
+  (Anthropic for Claude Code, OpenAI for Codex), not actual bills.
 - The app, board backend, and this site are all open source.
 
 ## Docs

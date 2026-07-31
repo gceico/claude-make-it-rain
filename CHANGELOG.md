@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAI Codex spend is now tracked alongside Claude Code.** The app reads
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` in addition to the Claude Code
+  logs and folds both into a single running total, so the tray figure, the
+  dollar-fly and money-rain animations, the habit coach, and the (optional)
+  collective-spend report all cover both agents. Codex logs differ from Claude
+  Code's — the model lives on a separate `turn_context` line and token counts
+  are reported cumulatively per session — so they get their own monitor that
+  diffs successive readings; midnight-spanning sessions attribute only today's
+  growth. Nothing to configure: with no Codex installed, the source simply
+  contributes nothing.
+- Per-tool spend breakdown ("Claude Code $X · Codex $Y") under **See your
+  numbers**, since the combined total otherwise hides which agent spent what.
+
 ### Changed
 
 - **Ported the toolchain to Bun + TypeScript with an Astro website (targets
@@ -38,6 +53,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   provided are no longer enforced — `bunx tsc --noEmit` (strict mode) remains
   the type-correctness gate. `web/` stays on TypeScript `^5.9.3` for now because
   `@astrojs/check` (the Astro type checker) crashes under TS 7.
+
+### Fixed
+
+- Codex session "context size" was read off the cumulative session totals, so it
+  grew without bound over a long session (a 50-turn session reported millions of
+  tokens). It now comes from the per-request `last_token_usage`, the true prompt
+  size. This also stops the inflated figure from being written into the stored
+  analytics for past days, where it permanently pinned the context term of the
+  Optimization Score and made the "long session" habit fire every day.
+- The Codex monitor rebuilt the tray menu on every 3-second poll even when
+  nothing had changed, which on macOS dismisses the menu while you are reading
+  it. It now updates only when the numbers actually move.
+- A Codex session resumed days after it started (`codex resume` keeps appending
+  to the original rollout file, which lives under its original date directory)
+  silently stopped being counted after one day.
+- `gpt-5.1-codex-mini` was priced at the full Codex rate rather than the mini
+  rate, overcharging Codex-mini usage roughly fivefold.
+- Codex's synthetic first-turn messages (the environment blurb, `AGENTS.md`
+  instructions) were counted as prompts you typed, inflating the per-session
+  turn count the habit detectors read.
 
 ## [1.0.4] - 2026-07-09
 

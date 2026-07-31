@@ -2,8 +2,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { costForEntry } from './pricing';
+import { costForEntry, pricingForCodexModel } from './pricing';
 import { parseUsageEntry } from './entry-parser';
+import { parseCodexLine } from './codex-entry-parser';
+import {
+  mapCodexUsage,
+  zeroTotals,
+  delta as codexDelta,
+} from './codex-monitor';
+import { discoverCodexFilesAsync, resolveCodexSessionsDir } from './codex-dirs';
 import { AnalyticsStore, emptyDailySnapshot } from './analytics-store';
 import type { DailySnapshot, ToolingState } from './analytics-store';
 import { runHabitDetectors } from './habits';
@@ -185,9 +192,146 @@ async function discoverFiles(roots: string[], since: Date): Promise<string[]> {
   return result;
 }
 
+function emptyBucket(): DayBucket {
+  return {
+    costUSD: 0,
+    entryCount: 0,
+    perModel: {},
+    cacheReadTok: 0,
+    cacheCreationTok: 0,
+    sessionMaxContext: new Map(),
+  };
+}
+
+/** Adds every field of `src` into `dst` (same-day merge of two DayBuckets). */
+function mergeDayBucket(dst: DayBucket, src: DayBucket): void {
+  dst.costUSD += src.costUSD;
+  dst.entryCount += src.entryCount;
+  for (const [model, m] of Object.entries(src.perModel)) {
+    const b = dst.perModel[model] || { costUSD: 0, inTok: 0, outTok: 0 };
+    b.costUSD += m.costUSD;
+    b.inTok += m.inTok;
+    b.outTok += m.outTok;
+    dst.perModel[model] = b;
+  }
+  dst.cacheReadTok += src.cacheReadTok;
+  dst.cacheCreationTok += src.cacheCreationTok;
+  for (const [sid, ctx] of src.sessionMaxContext) {
+    const prev = dst.sessionMaxContext.get(sid) || 0;
+    if (ctx > prev) dst.sessionMaxContext.set(sid, ctx);
+  }
+}
+
+/** Folds a Codex day map into a Claude day map (mutating `into`). */
+function mergeDayMaps(
+  into: Map<string, DayBucket>,
+  from: Map<string, DayBucket>
+): void {
+  for (const [day, bucket] of from) {
+    const dst = into.get(day) || emptyBucket();
+    mergeDayBucket(dst, bucket);
+    into.set(day, dst);
+  }
+}
+
+/**
+ * Retroactive Codex spend for [startMs, endMs), grouped by local calendar day.
+ *
+ * Codex writes one rollout file per session with *cumulative* token counts, so
+ * each file is read in full while tracking the active model (from turn_context)
+ * and the previous cumulative reading. Each token_count's per-component delta is
+ * attributed to the day of its own timestamp, but ONLY when that timestamp falls
+ * in the window — while `lastTotal` is still advanced for out-of-window events,
+ * so the window's first in-range delta measures real growth (this makes a
+ * session that spans a window/day boundary correct, and needs no cross-file
+ * dedup since one session lives in exactly one file).
+ */
+async function scanCodexWindow(
+  sessionsDir: string | null,
+  startMs: number,
+  endMs: number
+): Promise<{
+  days: Map<string, DayBucket>;
+  totalCostUSD: number;
+  entryCount: number;
+}> {
+  const days = new Map<string, DayBucket>();
+  let totalCostUSD = 0;
+  let entryCount = 0;
+  if (!sessionsDir) return { days, totalCostUSD, entryCount };
+
+  const files = await discoverCodexFilesAsync(sessionsDir, startMs);
+  for (const file of files) {
+    let content: string;
+    try {
+      content = await fs.promises.readFile(file, 'utf8');
+    } catch {
+      continue;
+    }
+    let model: string | null = null;
+    let sessionId: string | null = file; // fall back to path if no session_meta
+    let lastTotal = zeroTotals();
+
+    for (const line of content.split('\n')) {
+      if (!line) continue;
+      const rec = parseCodexLine(line);
+      if (!rec) continue;
+
+      if (rec.kind === 'session_meta') {
+        if (rec.sessionId) sessionId = rec.sessionId;
+        continue;
+      }
+      if (rec.kind === 'turn_context') {
+        model = rec.model;
+        continue;
+      }
+      if (rec.kind !== 'token_count') continue;
+
+      const total = rec.total;
+      const delta = codexDelta(total, lastTotal);
+      lastTotal = total;
+
+      const t = rec.timestamp.getTime();
+      if (t < startMs || t >= endMs) continue;
+
+      const usage = mapCodexUsage(delta);
+      const cost = costForEntry(usage, model, pricingForCodexModel);
+      const key = dayKey(rec.timestamp);
+      const bucket = days.get(key) || emptyBucket();
+      bucket.costUSD += cost;
+      bucket.entryCount += 1;
+
+      const modelKey = model || 'unknown';
+      const mb = bucket.perModel[modelKey] || {
+        costUSD: 0,
+        inTok: 0,
+        outTok: 0,
+      };
+      mb.costUSD += cost;
+      mb.inTok += usage.inputTokens;
+      mb.outTok += usage.outputTokens;
+      bucket.perModel[modelKey] = mb;
+
+      bucket.cacheReadTok += delta.cachedInputTokens;
+
+      // Context is the last request's prompt size, NOT the session's cumulative
+      // totals (which grow without bound); see codex-entry-parser.contextTokens.
+      const context = rec.contextTokens;
+      const prevMax = bucket.sessionMaxContext.get(sessionId) || 0;
+      if (context > prevMax) bucket.sessionMaxContext.set(sessionId, context);
+
+      days.set(key, bucket);
+      totalCostUSD += cost;
+      entryCount += 1;
+    }
+  }
+  return { days, totalCostUSD, entryCount };
+}
+
 interface ScanWindowArgs {
   projectsDir: string;
   coworkSessionsDir?: string | null;
+  codexSessionsDir?: string | null;
   startMs: number;
   endMs: number;
   baseSeen?: Set<string> | null;
@@ -207,10 +351,15 @@ interface ScanWindowArgs {
 async function scanWindow({
   projectsDir,
   coworkSessionsDir = null,
+  codexSessionsDir = null,
   startMs,
   endMs,
   baseSeen = null,
 }: ScanWindowArgs): Promise<ScanResult> {
+  // Kick off the Codex scan concurrently — it walks a disjoint directory tree
+  // and only needs joining in at the end (mergeDayMaps below).
+  const codexPromise = scanCodexWindow(codexSessionsDir, startMs, endMs);
+
   const files = await discoverFiles(
     allProjectsDirs(projectsDir, coworkSessionsDir),
     new Date(startMs)
@@ -219,15 +368,6 @@ async function scanWindow({
   const days = new Map<string, DayBucket>(); // dayKey -> DayBucket
   let totalCostUSD = 0;
   let entryCount = 0;
-
-  const emptyBucket = (): DayBucket => ({
-    costUSD: 0,
-    entryCount: 0,
-    perModel: {},
-    cacheReadTok: 0,
-    cacheCreationTok: 0,
-    sessionMaxContext: new Map(),
-  });
 
   for (const file of files) {
     let content: string;
@@ -283,6 +423,14 @@ async function scanWindow({
       entryCount += 1;
     }
   }
+
+  // Fold in retroactive Codex spend for the same window. Codex sessions are
+  // self-contained per file (no cross-file dedup), and its gpt-* model keys
+  // never collide with Claude's, so both tools coexist in each DayBucket.
+  const codex = await codexPromise;
+  mergeDayMaps(days, codex.days);
+  totalCostUSD += codex.totalCostUSD;
+  entryCount += codex.entryCount;
 
   return { days, seenKeys: seen, totalCostUSD, entryCount };
 }
@@ -350,6 +498,7 @@ function dailySnapshotFromBucket(bucket: DayBucket): DailySnapshot {
 interface ScanRangeArgs {
   projectsDir: string;
   coworkSessionsDir?: string | null;
+  codexSessionsDir?: string | null;
   rangeId: string;
   now?: Date;
 }
@@ -363,6 +512,7 @@ interface ScanRangeArgs {
 export async function scanRange({
   projectsDir,
   coworkSessionsDir = null,
+  codexSessionsDir = null,
   rangeId,
   now = new Date(),
 }: ScanRangeArgs): Promise<RangeResult> {
@@ -370,6 +520,7 @@ export async function scanRange({
   const { days, totalCostUSD, entryCount } = await scanWindow({
     projectsDir,
     coworkSessionsDir,
+    codexSessionsDir,
     startMs: range.start.getTime(),
     endMs: range.end.getTime(),
   });
@@ -406,6 +557,8 @@ export interface HistoryOptions {
   projectsDir?: string;
   /** Cowork sessions root; `null` skips Cowork. See resolveCoworkSessionsDir. */
   coworkSessionsDir?: string | null;
+  /** Codex sessions root; `null` skips Codex. See resolveCodexSessionsDir. */
+  codexSessionsDir?: string | null;
   cacheTtlMs?: number;
   /** Optional analytics store to persist finished (immutable) ledger days
    *  into, so daily snapshots survive relaunch and past months even if
@@ -437,6 +590,7 @@ export interface HistoryOptions {
 export class History {
   projectsDir: string;
   coworkSessionsDir: string | null;
+  codexSessionsDir: string | null;
   cacheTtlMs: number;
   _cache: Map<string, CacheEntry>;
   _ledger: LedgerEntry | null;
@@ -446,6 +600,7 @@ export class History {
   constructor({
     projectsDir,
     coworkSessionsDir,
+    codexSessionsDir,
     cacheTtlMs = 60_000,
     analyticsStore = null,
   }: HistoryOptions = {}) {
@@ -454,6 +609,7 @@ export class History {
       projectsDir,
       coworkSessionsDir
     );
+    this.codexSessionsDir = resolveCodexSessionsDir(codexSessionsDir);
     this.cacheTtlMs = cacheTtlMs;
     this._cache = new Map(); // rangeId -> { at, dayStartMs, promise }
     this._ledger = null; // { promise, dayStartMs, startMs }
@@ -481,6 +637,7 @@ export class History {
     const promise = scanWindow({
       projectsDir: this.projectsDir,
       coworkSessionsDir: this.coworkSessionsDir,
+      codexSessionsDir: this.codexSessionsDir,
       startMs,
       endMs: dayStartMs,
     })
@@ -534,6 +691,7 @@ export class History {
         scanWindow({
           projectsDir: this.projectsDir,
           coworkSessionsDir: this.coworkSessionsDir,
+          codexSessionsDir: this.codexSessionsDir,
           startMs: dayStartMs,
           endMs: addDays(new Date(dayStartMs), 1).getTime(),
           baseSeen: ledger.seenKeys,

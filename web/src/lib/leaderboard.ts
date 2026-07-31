@@ -402,7 +402,7 @@ function renderBoard(data: LeaderboardData): void {
     board.innerHTML =
       '<div class="state">' +
       '<span class="lead">No one is raining yet today.</span><br>' +
-      'Fire up Claude Code and start the drizzle.' +
+      'Fire up your coding agent and start the drizzle.' +
       '</div>';
     return;
   }

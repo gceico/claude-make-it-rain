@@ -26,6 +26,9 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { UsageMonitor } from './lib/usage-monitor';
 import type { Snapshot } from './lib/usage-monitor';
+import { CodexMonitor, emptyCodexSnapshot } from './lib/codex-monitor';
+import type { CodexSnapshot } from './lib/codex-monitor';
+import { mergeSnapshots } from './lib/snapshot-merge';
 import { Config } from './lib/config';
 import * as denominations from './lib/denominations';
 import * as equivalences from './lib/equivalences';
@@ -95,6 +98,7 @@ let tray: Tray | null = null;
 // Each entry: { win: BrowserWindow, ready: boolean, pending: [{channel, payload}] }
 const overlays = new Map<number, OverlayEntry>();
 let monitor: UsageMonitor | null = null;
+let codexMonitor: CodexMonitor | null = null;
 let config: Config | null = null;
 let leaderboard: LeaderboardClient | null = null;
 let updateChecker: UpdateChecker | null = null;
@@ -117,7 +121,18 @@ let latestSnapshot: Snapshot = {
   userTurns: [],
   sessionGaps: [],
 };
-let initialScanHandled = false;
+// Two independent spend sources — Claude Code and OpenAI Codex — each emit
+// their own snapshot on their own poll. We hold the latest of each and combine
+// them into `latestSnapshot` centrally (see onSourceUpdate) so the tray,
+// milestone animations, and leaderboard see ONE running total with a single
+// prev→new transition. Animations must not fire until BOTH sources have
+// finished their first scan, or the second source's initial scan would replay
+// its whole day as bills/stacks/rain.
+let claudeSnapshot: Snapshot = latestSnapshot;
+let codexSnapshot: CodexSnapshot = emptyCodexSnapshot();
+let lastCombinedTotal = 0;
+let claudeInitialDone = false;
+let codexInitialDone = false;
 let history: History | null = null;
 // rangeId -> scan result (or 'loading'); drives the "Past spending" submenu.
 const historyData = new Map<string, RangeResult | 'loading'>();
@@ -407,6 +422,15 @@ function awarenessItems(): MenuItemConstructorOptions[] {
   const lifetime = analyticsStore ? analyticsStore.data.savings.lifetimeUSD : 0;
 
   const items: MenuItemConstructorOptions[] = [{ type: 'separator' }];
+  // The tray total folds both coding agents together; this is the only place
+  // the per-provider breakdown survives. Shown only once Codex has spent
+  // something, so Claude-only users see no extra noise.
+  if (codexSnapshot.totalCostUSD > 0) {
+    items.push({
+      label: `By tool: Claude Code $${claudeSnapshot.totalCostUSD.toFixed(2)} · Codex $${codexSnapshot.totalCostUSD.toFixed(2)}`,
+      enabled: false,
+    });
+  }
   const modelSplit = byId.get('model-split');
   const cacheRate = byId.get('cache-rate');
   if (modelSplit) items.push({ label: modelSplit.coachCopy, enabled: false });
@@ -1063,18 +1087,35 @@ function watchDisplays(): void {
 }
 
 // ── Monitor wiring ──────────────────────────────────────────────────────────
+/**
+ * Recombine the latest Claude + Codex snapshots into one total and drive the
+ * animations off a single combined prev→new transition. Called on every update
+ * from either source. Baseline gating (no animation until both sources have
+ * completed their initial scan) lives here rather than in handleUpdate, so the
+ * second source coming online never replays a day of spend as animations.
+ */
+function onSourceUpdate(): void {
+  const combined = mergeSnapshots(claudeSnapshot, codexSnapshot);
+
+  // Until both sources' first scans are in AND the combined baseline has been
+  // seeded, just update the tray/latestSnapshot without animating: the jump
+  // from $0 to today's already-accumulated total (and the second source coming
+  // online) must never replay the day as bills, stacks, or rain.
+  if (!(claudeInitialDone && codexInitialDone)) {
+    lastCombinedTotal = combined.totalCostUSD;
+    applySnapshot(combined);
+    return;
+  }
+
+  const previousTotal = lastCombinedTotal;
+  lastCombinedTotal = combined.totalCostUSD;
+  handleUpdate(previousTotal, combined);
+}
+
 function handleUpdate(previousTotal: number, snapshot: Snapshot): void {
   applySnapshot(snapshot);
 
   const newTotal = snapshot.totalCostUSD;
-
-  // The very first onUpdate after start() is the initial scan: it jumps from $0
-  // to today's already-accumulated total. Nothing animates there — launching the
-  // app must never replay the day's spend (bills, stacks, or rain); it only
-  // seeds the baseline that later real spend is measured against.
-  const isInitialScan = !initialScanHandled;
-  initialScanHandled = true;
-  if (isInitialScan) return;
 
   // Dollar-fly: number of whole-dollar boundaries crossed since the last update.
   const dollarsGained = dollarsCrossed(previousTotal, newTotal);
@@ -1218,13 +1259,40 @@ if (!app.requestSingleInstanceLock()) {
 
     monitor = new UsageMonitor();
     monitor.onInitialScanComplete = (snapshot) => {
+      claudeSnapshot = snapshot;
+      claudeInitialDone = true;
       console.log(
-        `MakeItRain: today so far $${snapshot.totalCostUSD.toFixed(2)} (${snapshot.entryCount} entries)`
+        `MakeItRain: Claude today so far $${snapshot.totalCostUSD.toFixed(2)} (${snapshot.entryCount} entries)`
       );
+      onSourceUpdate();
     };
-    monitor.onUpdate = (previousTotal, snapshot) =>
-      handleUpdate(previousTotal, snapshot);
+    monitor.onUpdate = (_previousTotal, snapshot) => {
+      claudeSnapshot = snapshot;
+      onSourceUpdate();
+    };
     monitor.start();
+
+    // OpenAI Codex CLI/IDE spend (~/.codex/sessions), folded into the same
+    // combined total as Claude Code so the widget and board treat both coding
+    // agents together.
+    codexMonitor = new CodexMonitor();
+    codexMonitor.onInitialScanComplete = (snapshot) => {
+      codexSnapshot = snapshot;
+      codexInitialDone = true;
+      console.log(
+        `MakeItRain: Codex today so far $${snapshot.totalCostUSD.toFixed(2)} (${snapshot.entryCount} entries)`
+      );
+      onSourceUpdate();
+    };
+    codexMonitor.onUpdate = (snapshot) => {
+      codexSnapshot = snapshot;
+      onSourceUpdate();
+    };
+    // Deferred one tick so Claude's synchronous initial scan above doesn't
+    // block the event loop back-to-back with Codex's — lets the tray/menu
+    // stay responsive between the two blocking directory walks.
+    const codex = codexMonitor;
+    setImmediate(() => codex.start());
 
     // Cloud daily leaderboard: anonymized tag + today's total, reported every 10 min.
     // Telemetry is ON by default but disclosed and toggleable from the tray menu.
@@ -1308,6 +1376,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('will-quit', () => {
     if (monitor) monitor.stop();
+    if (codexMonitor) codexMonitor.stop();
     if (leaderboard) leaderboard.stop();
     if (updateChecker) updateChecker.stop();
   });
