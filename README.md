@@ -5,7 +5,8 @@
 
 ![Make It Rain in action](https://raw.githubusercontent.com/gceico/claude-make-it-rain/main/img/make-it-rain.gif)
 
-A menu bar app that makes your Claude Code spend impossible to ignore. **Every
+A menu bar app that makes your AI coding-agent spend — Claude Code and OpenAI
+Codex, combined into one running total — impossible to ignore. **Every
 $1 flies a 💵 off the menu bar — and every $100 makes it rain.** 💸 Then it adds
 your day into a shared picture of what everyone is spending, and asks the only
 question that matters: was it worth building it?
@@ -26,8 +27,10 @@ npx @gceico/claude-make-it-rain
 The app detaches from the terminal and lives in your tray/menu bar. Quit it
 from the tray menu.
 
-Needs Node 22+ (you have it if you run Claude Code) and Claude Code writing
-session logs to `~/.claude/projects` (the default). Runs on macOS, Windows,
+Needs Node 22+ (you have it if you run Claude Code). It reads the session logs
+your agents already write — `~/.claude/projects` for Claude Code and
+`~/.codex/sessions` for Codex (both defaults); whichever you don't use simply
+contributes nothing. Runs on macOS, Windows,
 and Linux — the dollar amount next to the tray icon is macOS-only; elsewhere
 it lives in the tooltip and menu.
 

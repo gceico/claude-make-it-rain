@@ -20,6 +20,10 @@ export const FAQ: FaqItem[] = [
     a: "Make It Rain is an open-source menu-bar app that watches your AI coding agents' usage — Claude Code, Codex, and the like — and puts the day's estimated spend where you can't ignore it. Each dollar of spend flies a bill across your screen, and each $100 milestone sets off a downpour of cash. It turns a number you'd usually skip past into a cost meter you feel as it happens.",
   },
   {
+    q: 'Which coding agents does it track?',
+    a: 'Claude Code and OpenAI Codex, both read straight off the session logs they already write to your own disk (~/.claude/projects, including Cowork sessions, and ~/.codex/sessions). The menu bar shows one combined running total for the day, because what you care about is the bill, not which tool wrote it; the per-tool split is under "See your numbers", along with the per-model breakdown. Nothing needs configuring: if an agent is not installed, it simply contributes nothing.',
+  },
+  {
     q: 'What is "Optimize your spend"?',
     a: 'A local coach built into the menu bar. It watches the same privacy-safe numbers as the spend meter — token counts, cache hit rate, which tools you have installed — and surfaces one tip a day when it spots a costly habit: caching left off, a giant paste, a task run on a pricier model than it needed. It can also offer to install <a href="https://github.com/rtk-ai/rtk" target="_blank" rel="noopener">RTK</a>, <a href="https://github.com/JuliusBrussee/caveman" target="_blank" rel="noopener">Caveman</a>, or <a href="https://github.com/DietrichGebert/ponytail" target="_blank" rel="noopener">Ponytail</a> when one would cut your token spend, always with your confirmation first. Nothing about the tip, the numbers behind it, or which tools you have, ever leaves your machine.',
   },
