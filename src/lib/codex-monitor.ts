@@ -77,14 +77,17 @@ interface CodexFileState {
   userTurns: UserTurn[]; // today's user turns (length only)
 }
 
-const zeroTotals = (): CodexTokenTotals => ({
+export const zeroTotals = (): CodexTokenTotals => ({
   inputTokens: 0,
   cachedInputTokens: 0,
   outputTokens: 0,
 });
 
 /** Component-wise max(0, a - b): the growth of each cumulative counter. */
-function delta(a: CodexTokenTotals, b: CodexTokenTotals): CodexTokenTotals {
+export function delta(
+  a: CodexTokenTotals,
+  b: CodexTokenTotals
+): CodexTokenTotals {
   return {
     inputTokens: Math.max(0, a.inputTokens - b.inputTokens),
     cachedInputTokens: Math.max(0, a.cachedInputTokens - b.cachedInputTokens),

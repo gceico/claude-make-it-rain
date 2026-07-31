@@ -28,7 +28,7 @@ import { UsageMonitor } from './lib/usage-monitor';
 import type { Snapshot } from './lib/usage-monitor';
 import { CodexMonitor, emptyCodexSnapshot } from './lib/codex-monitor';
 import type { CodexSnapshot } from './lib/codex-monitor';
-import { mergeSnapshots, providerSplit } from './lib/snapshot-merge';
+import { mergeSnapshots } from './lib/snapshot-merge';
 import { Config } from './lib/config';
 import * as denominations from './lib/denominations';
 import * as equivalences from './lib/equivalences';
@@ -133,9 +133,6 @@ let codexSnapshot: CodexSnapshot = emptyCodexSnapshot();
 let lastCombinedTotal = 0;
 let claudeInitialDone = false;
 let codexInitialDone = false;
-// Set once BOTH sources have finished their first scan and the combined
-// baseline has been seeded; only after that do transitions animate.
-let baselineSeeded = false;
 let history: History | null = null;
 // rangeId -> scan result (or 'loading'); drives the "Past spending" submenu.
 const historyData = new Map<string, RangeResult | 'loading'>();
@@ -428,10 +425,9 @@ function awarenessItems(): MenuItemConstructorOptions[] {
   // The tray total folds both coding agents together; this is the only place
   // the per-provider breakdown survives. Shown only once Codex has spent
   // something, so Claude-only users see no extra noise.
-  const split = providerSplit(latestSnapshot.perModel);
-  if (split.codex > 0) {
+  if (codexSnapshot.totalCostUSD > 0) {
     items.push({
-      label: `By tool: Claude Code $${split.claude.toFixed(2)} · Codex $${split.codex.toFixed(2)}`,
+      label: `By tool: Claude Code $${claudeSnapshot.totalCostUSD.toFixed(2)} · Codex $${codexSnapshot.totalCostUSD.toFixed(2)}`,
       enabled: false,
     });
   }
@@ -1105,8 +1101,7 @@ function onSourceUpdate(): void {
   // seeded, just update the tray/latestSnapshot without animating: the jump
   // from $0 to today's already-accumulated total (and the second source coming
   // online) must never replay the day as bills, stacks, or rain.
-  if (!(claudeInitialDone && codexInitialDone) || !baselineSeeded) {
-    if (claudeInitialDone && codexInitialDone) baselineSeeded = true;
+  if (!(claudeInitialDone && codexInitialDone)) {
     lastCombinedTotal = combined.totalCostUSD;
     applySnapshot(combined);
     return;
@@ -1293,7 +1288,11 @@ if (!app.requestSingleInstanceLock()) {
       codexSnapshot = snapshot;
       onSourceUpdate();
     };
-    codexMonitor.start();
+    // Deferred one tick so Claude's synchronous initial scan above doesn't
+    // block the event loop back-to-back with Codex's — lets the tray/menu
+    // stay responsive between the two blocking directory walks.
+    const codex = codexMonitor;
+    setImmediate(() => codex.start());
 
     // Cloud daily leaderboard: anonymized tag + today's total, reported every 10 min.
     // Telemetry is ON by default but disclosed and toggleable from the tray menu.

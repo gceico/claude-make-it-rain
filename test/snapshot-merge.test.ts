@@ -5,7 +5,7 @@ import assert from 'node:assert';
 import type { Snapshot } from '../src/lib/usage-monitor';
 import { emptyCodexSnapshot } from '../src/lib/codex-monitor';
 import type { CodexSnapshot } from '../src/lib/codex-monitor';
-import { mergeSnapshots, providerSplit } from '../src/lib/snapshot-merge';
+import { mergeSnapshots } from '../src/lib/snapshot-merge';
 
 function claudeSnap(): Snapshot {
   return {
@@ -81,17 +81,4 @@ test('merging an empty Codex snapshot is a no-op on the Claude total', () => {
   const m = mergeSnapshots(claude, emptyCodexSnapshot());
   assert.strictEqual(m.totalCostUSD, claude.totalCostUSD);
   assert.deepStrictEqual(Object.keys(m.perModel), ['claude-opus-5']);
-});
-
-test('providerSplit recovers the per-tool spend from a merged snapshot', () => {
-  const split = providerSplit({
-    'claude-opus-5': { costUSD: 3, inputTokens: 0, outputTokens: 0 },
-    'claude-sonnet-5': { costUSD: 1.5, inputTokens: 0, outputTokens: 0 },
-    'gpt-5-codex': { costUSD: 2, inputTokens: 0, outputTokens: 0 },
-    'gpt-5.1-codex-mini': { costUSD: 0.25, inputTokens: 0, outputTokens: 0 },
-    unknown: { costUSD: 0.5, inputTokens: 0, outputTokens: 0 },
-  });
-  // 'unknown' falls to Claude so the halves always sum to the shown total.
-  assert.strictEqual(split.claude, 5);
-  assert.strictEqual(split.codex, 2.25);
 });

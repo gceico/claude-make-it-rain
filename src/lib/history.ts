@@ -5,8 +5,11 @@ import * as path from 'path';
 import { costForEntry, pricingForCodexModel } from './pricing';
 import { parseUsageEntry } from './entry-parser';
 import { parseCodexLine } from './codex-entry-parser';
-import type { CodexTokenTotals } from './codex-entry-parser';
-import { mapCodexUsage } from './codex-monitor';
+import {
+  mapCodexUsage,
+  zeroTotals,
+  delta as codexDelta,
+} from './codex-monitor';
 import { discoverCodexFilesAsync, resolveCodexSessionsDir } from './codex-dirs';
 import { AnalyticsStore, emptyDailySnapshot } from './analytics-store';
 import type { DailySnapshot, ToolingState } from './analytics-store';
@@ -231,12 +234,6 @@ function mergeDayMaps(
   }
 }
 
-const zeroTotals = (): CodexTokenTotals => ({
-  inputTokens: 0,
-  cachedInputTokens: 0,
-  outputTokens: 0,
-});
-
 /**
  * Retroactive Codex spend for [startMs, endMs), grouped by local calendar day.
  *
@@ -291,14 +288,7 @@ async function scanCodexWindow(
       if (rec.kind !== 'token_count') continue;
 
       const total = rec.total;
-      const delta: CodexTokenTotals = {
-        inputTokens: Math.max(0, total.inputTokens - lastTotal.inputTokens),
-        cachedInputTokens: Math.max(
-          0,
-          total.cachedInputTokens - lastTotal.cachedInputTokens
-        ),
-        outputTokens: Math.max(0, total.outputTokens - lastTotal.outputTokens),
-      };
+      const delta = codexDelta(total, lastTotal);
       lastTotal = total;
 
       const t = rec.timestamp.getTime();
@@ -366,6 +356,10 @@ async function scanWindow({
   endMs,
   baseSeen = null,
 }: ScanWindowArgs): Promise<ScanResult> {
+  // Kick off the Codex scan concurrently — it walks a disjoint directory tree
+  // and only needs joining in at the end (mergeDayMaps below).
+  const codexPromise = scanCodexWindow(codexSessionsDir, startMs, endMs);
+
   const files = await discoverFiles(
     allProjectsDirs(projectsDir, coworkSessionsDir),
     new Date(startMs)
@@ -433,7 +427,7 @@ async function scanWindow({
   // Fold in retroactive Codex spend for the same window. Codex sessions are
   // self-contained per file (no cross-file dedup), and its gpt-* model keys
   // never collide with Claude's, so both tools coexist in each DayBucket.
-  const codex = await scanCodexWindow(codexSessionsDir, startMs, endMs);
+  const codex = await codexPromise;
   mergeDayMaps(days, codex.days);
   totalCostUSD += codex.totalCostUSD;
   entryCount += codex.entryCount;
