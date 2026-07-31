@@ -71,7 +71,7 @@ interface CodexFileState {
   sessionId: string | null; // from session_meta
   lastTotal: CodexTokenTotals; // last cumulative reading (zeros initially)
   perModel: Map<string, CodexTokenTotals>; // today's attributed deltas per model
-  maxContextTokens: number; // peak total_tokens seen today (context proxy)
+  maxContextTokens: number; // peak per-request prompt size seen today
   activeToday: boolean; // any today delta attributed => counts as a session
   deltaCount: number; // token_count deltas attributed to today
   userTurns: UserTurn[]; // today's user turns (length only)
@@ -105,6 +105,21 @@ export function mapCodexUsage(t: CodexTokenTotals): Usage {
   };
 }
 
+/** Everything downstream (tray, board, habits) reads off these; if none moved,
+ *  the snapshot is equivalent and needs no emit. */
+function snapshotSignature(s: CodexSnapshot): string {
+  return [
+    s.totalCostUSD,
+    s.entryCount,
+    s.inputTokens,
+    s.outputTokens,
+    s.cachedInputTokens,
+    s.sessions.count,
+    s.sessions.maxContextTokens,
+    s.userTurns.length,
+  ].join('|');
+}
+
 export class CodexMonitor {
   sessionsDir: string | null;
   pollMs: number;
@@ -116,6 +131,8 @@ export class CodexMonitor {
   onInitialScanComplete: ((snapshot: CodexSnapshot) => void) | null;
 
   timer: NodeJS.Timeout | null;
+  /** Signature of the last snapshot handed to onUpdate (see snapshotSignature). */
+  lastSignature: string | null;
   tailState!: TailState;
   fileStates!: Map<string, CodexFileState>;
   currentDayStart!: Date;
@@ -126,6 +143,7 @@ export class CodexMonitor {
     this.onUpdate = null;
     this.onInitialScanComplete = null;
     this.timer = null;
+    this.lastSignature = null;
     this._resetState();
   }
 
@@ -166,7 +184,13 @@ export class CodexMonitor {
     if (isInitial && this.onInitialScanComplete) {
       this.onInitialScanComplete(snap);
     }
-    if (this.onUpdate) this.onUpdate(snap);
+    // Emit only when something actually moved. onUpdate rebuilds the tray menu,
+    // and on macOS replacing the context menu while it is open dismisses it —
+    // an unconditional emit every pollMs would close the menu under the user.
+    const sig = snapshotSignature(snap);
+    const changed = isInitial || sig !== this.lastSignature;
+    this.lastSignature = sig;
+    if (changed && this.onUpdate) this.onUpdate(snap);
   }
 
   discoverCandidateFiles(): string[] {
@@ -247,8 +271,9 @@ export class CodexMonitor {
         bucket.outputTokens += d.outputTokens;
         s.perModel.set(modelKey, bucket);
 
-        const context = parsed.total.inputTokens + parsed.total.outputTokens;
-        if (context > s.maxContextTokens) s.maxContextTokens = context;
+        if (parsed.contextTokens > s.maxContextTokens) {
+          s.maxContextTokens = parsed.contextTokens;
+        }
         s.activeToday = true;
         s.deltaCount += 1;
         return;

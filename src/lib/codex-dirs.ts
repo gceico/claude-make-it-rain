@@ -45,10 +45,18 @@ function numericDirs(dir: string): string[] {
 }
 
 /**
- * The local calendar day (midnight) `n` days before `dayStartMs`. Used as a
- * lenient lower bound for the YYYY/MM/DD path prefilter: the per-file mtime
- * check is the real correctness gate, so a day of slack absorbs any timezone
- * skew between the (possibly UTC) directory date and the local mtime window.
+ * How many days of slack the YYYY/MM/DD path prefilter allows below the mtime
+ * window. It must cover more than timezone skew: `codex resume` keeps appending
+ * to the *original* rollout file, so a session started weeks ago can still be
+ * written to today while living in an old day-dir. The per-file mtime check
+ * remains the real correctness gate.
+ * ponytail: fixed window; drop the prefilter entirely if resumes older than
+ * this ever show up missing.
+ */
+const DAY_DIR_SLACK_DAYS = 45;
+
+/**
+ * The local calendar day (midnight) `n` days before `dayStartMs`.
  */
 function startOfDayMinus(dayStartMs: number, n: number): number {
   const d = new Date(dayStartMs);
@@ -61,17 +69,17 @@ function startOfDayMinus(dayStartMs: number, n: number): number {
  * Every `rollout-*.jsonl` under `sessionsRoot` touched at/after `sinceMs`.
  *
  * The YYYY/MM/DD path is used as a cheap prefilter to skip clearly-old day
- * directories (with one day of slack, see startOfDayMinus), then each surviving
- * file is stat-filtered on mtime. A session started yesterday but appended to
- * today has `mtime >= sinceMs` and is kept even though its directory date is
- * yesterday. Per-event timestamps still gate results downstream, so the mtime
+ * directories (with DAY_DIR_SLACK_DAYS of slack), then each surviving file is
+ * stat-filtered on mtime. A session started earlier but appended to today has
+ * `mtime >= sinceMs` and is kept even though its directory date is older.
+ * Per-event timestamps still gate results downstream, so the mtime
  * filter is only an optimization.
  */
 export function discoverCodexFiles(
   sessionsRoot: string,
   sinceMs: number
 ): string[] {
-  const cutoffDayMs = startOfDayMinus(sinceMs, 1);
+  const cutoffDayMs = startOfDayMinus(sinceMs, DAY_DIR_SLACK_DAYS);
   const result: string[] = [];
 
   for (const yyyy of numericDirs(sessionsRoot)) {
@@ -115,7 +123,7 @@ export async function discoverCodexFilesAsync(
   sessionsRoot: string,
   sinceMs: number
 ): Promise<string[]> {
-  const cutoffDayMs = startOfDayMinus(sinceMs, 1);
+  const cutoffDayMs = startOfDayMinus(sinceMs, DAY_DIR_SLACK_DAYS);
   const result: string[] = [];
 
   const numericDirsAsync = async (dir: string): Promise<string[]> => {

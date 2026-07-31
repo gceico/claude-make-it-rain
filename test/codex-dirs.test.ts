@@ -31,6 +31,7 @@ const todayStart = new Date(now);
 todayStart.setHours(0, 0, 0, 0);
 const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
 const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 3600 * 1000);
+const longAgo = new Date(now.getTime() - 200 * 24 * 3600 * 1000);
 
 test('CODEX_HOME overrides the default sessions dir', () => {
   const prev = process.env.CODEX_HOME;
@@ -54,9 +55,18 @@ test('discovers rollout files recursively under YYYY/MM/DD', () => {
 });
 
 test('day-dir prefilter skips clearly-old days', () => {
-  const oldFile = makeRollout(tenDaysAgo, 'old');
+  const oldFile = makeRollout(longAgo, 'ancient');
   const found = discoverCodexFiles(sessionsRoot, todayStart.getTime());
   assert.ok(!found.includes(oldFile));
+});
+
+test('an old-dir session still being appended to today is included', () => {
+  // `codex resume` keeps writing into the ORIGINAL rollout file, so a session
+  // started weeks ago can have a fresh mtime while living in an old day-dir.
+  const file = makeRollout(tenDaysAgo, 'resumed');
+  fs.utimesSync(file, now, now);
+  const found = discoverCodexFiles(sessionsRoot, todayStart.getTime());
+  assert.ok(found.includes(file));
 });
 
 test('a yesterday-dir file appended today (fresh mtime) is included', () => {

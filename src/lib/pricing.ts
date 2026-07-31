@@ -109,6 +109,12 @@ export function pricingForCodexModel(
     return { inputPerMillion: 1.75, outputPerMillion: 14 };
   }
   if (m.includes('codex')) {
+    // Size tiers first: gpt-5.1-codex-mini bills at the mini rate, not the
+    // flagship one (a ~5x difference), and likewise for any -nano variant.
+    if (m.includes('nano'))
+      return { inputPerMillion: 0.05, outputPerMillion: 0.4 };
+    if (m.includes('mini'))
+      return { inputPerMillion: 0.25, outputPerMillion: 2 };
     // gpt-5-codex / gpt-5.1-codex / future codex ids without their own tier.
     return { inputPerMillion: 1.25, outputPerMillion: 10 };
   }

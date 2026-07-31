@@ -35,7 +35,7 @@ const turn = (model: string) =>
     payload: { model },
   });
 const tc = (
-  cum: { input: number; cached?: number; output?: number },
+  cum: { input: number; cached?: number; output?: number; context?: number },
   ts = todayISO
 ) =>
   JSON.stringify({
@@ -50,6 +50,13 @@ const tc = (
           output_tokens: cum.output || 0,
           reasoning_output_tokens: 0,
           total_tokens: cum.input + (cum.output || 0),
+        },
+        // Per-request usage: `input_tokens` here is the actual context size.
+        last_token_usage: {
+          input_tokens: cum.context ?? cum.input,
+          cached_input_tokens: cum.cached || 0,
+          output_tokens: cum.output || 0,
+          reasoning_output_tokens: 0,
         },
       },
     },
@@ -211,8 +218,9 @@ test('mixed session: per-model split, user turns (length only), sessions + max c
   // The prompt text itself never appears in the snapshot.
   assert.ok(!JSON.stringify(snap).includes('first prompt'));
   assert.strictEqual(snap.sessions.count, 1);
-  // maxContextTokens = peak (input+output) reading = 500 + 300.
-  assert.strictEqual(snap.sessions.maxContextTokens, 800);
+  // maxContextTokens = peak per-request prompt size (last_token_usage), NOT the
+  // cumulative session total: 500, not 500 + 300 nor 200 + 500.
+  assert.strictEqual(snap.sessions.maxContextTokens, 500);
 });
 
 test('onInitialScanComplete and onUpdate both fire on the first tick', () => {
@@ -226,4 +234,26 @@ test('onInitialScanComplete and onUpdate both fire on the first tick', () => {
   m.tick(true);
   assert.strictEqual(initial, 1);
   assert.strictEqual(updates, 1);
+});
+
+test('onUpdate is skipped when a tick produces an identical snapshot', () => {
+  // Emitting rebuilds the tray menu; on macOS that dismisses an open menu, so a
+  // no-op tick must stay silent.
+  const root = freshRoot();
+  const file = writeSession(root, 's', [
+    turn('gpt-5-codex'),
+    tc({ input: 100 }),
+  ]);
+  const m = new CodexMonitor({ sessionsDir: root, pollMs: 999999 });
+  let updates = 0;
+  m.onUpdate = () => (updates += 1);
+  m.tick(true);
+  assert.strictEqual(updates, 1);
+  m.tick(false); // nothing changed on disk
+  m.tick(false);
+  assert.strictEqual(updates, 1);
+
+  fs.appendFileSync(file, tc({ input: 300 }) + '\n');
+  m.tick(false);
+  assert.strictEqual(updates, 2);
 });

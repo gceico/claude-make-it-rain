@@ -324,7 +324,9 @@ async function scanCodexWindow(
 
       bucket.cacheReadTok += delta.cachedInputTokens;
 
-      const context = total.inputTokens + total.outputTokens;
+      // Context is the last request's prompt size, NOT the session's cumulative
+      // totals (which grow without bound); see codex-entry-parser.contextTokens.
+      const context = rec.contextTokens;
       const prevMax = bucket.sessionMaxContext.get(sessionId) || 0;
       if (context > prevMax) bucket.sessionMaxContext.set(sessionId, context);
 

@@ -28,7 +28,7 @@ import { UsageMonitor } from './lib/usage-monitor';
 import type { Snapshot } from './lib/usage-monitor';
 import { CodexMonitor, emptyCodexSnapshot } from './lib/codex-monitor';
 import type { CodexSnapshot } from './lib/codex-monitor';
-import { mergeSnapshots } from './lib/snapshot-merge';
+import { mergeSnapshots, providerSplit } from './lib/snapshot-merge';
 import { Config } from './lib/config';
 import * as denominations from './lib/denominations';
 import * as equivalences from './lib/equivalences';
@@ -425,6 +425,16 @@ function awarenessItems(): MenuItemConstructorOptions[] {
   const lifetime = analyticsStore ? analyticsStore.data.savings.lifetimeUSD : 0;
 
   const items: MenuItemConstructorOptions[] = [{ type: 'separator' }];
+  // The tray total folds both coding agents together; this is the only place
+  // the per-provider breakdown survives. Shown only once Codex has spent
+  // something, so Claude-only users see no extra noise.
+  const split = providerSplit(latestSnapshot.perModel);
+  if (split.codex > 0) {
+    items.push({
+      label: `By tool: Claude Code $${split.claude.toFixed(2)} · Codex $${split.codex.toFixed(2)}`,
+      enabled: false,
+    });
+  }
   const modelSplit = byId.get('model-split');
   const cacheRate = byId.get('cache-rate');
   if (modelSplit) items.push({ label: modelSplit.coachCopy, enabled: false });

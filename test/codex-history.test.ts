@@ -47,6 +47,12 @@ const tc = (input: number, ts: string) => ({
         reasoning_output_tokens: 0,
         total_tokens: input,
       },
+      last_token_usage: {
+        input_tokens: input,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+      },
     },
   },
 });

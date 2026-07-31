@@ -23,6 +23,30 @@ import type { CodexSnapshot } from './codex-monitor';
  *    >5min gap followed by a cache-*creation* spike, which Codex never emits, so
  *    that one habit simply never counts Codex sessions.
  */
+/** Per-provider USD split recovered from a merged snapshot's `perModel`.
+ *
+ *  Merging is lossy for provenance — once folded, only the model ids say who
+ *  spent what. Codex ids are OpenAI's `gpt-*`/`o*` families and Claude's are
+ *  `claude-*`, so the key prefix is the discriminator. Anything unrecognised
+ *  (including the `unknown` bucket) is attributed to Claude, the historical
+ *  default source, so the two halves always sum to the total. */
+export function providerSplit(perModel: Record<string, ModelBucket>): {
+  claude: number;
+  codex: number;
+} {
+  let codex = 0;
+  let claude = 0;
+  for (const [model, b] of Object.entries(perModel)) {
+    const m = model.toLowerCase();
+    if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) {
+      codex += b.costUSD;
+    } else {
+      claude += b.costUSD;
+    }
+  }
+  return { claude, codex };
+}
+
 export function mergeSnapshots(
   claude: Snapshot,
   codex: CodexSnapshot

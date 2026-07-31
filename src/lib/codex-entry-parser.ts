@@ -41,7 +41,15 @@ export type CodexRecord =
       projectKey: string | null;
     }
   | { kind: 'turn_context'; model: string | null }
-  | { kind: 'token_count'; timestamp: Date; total: CodexTokenTotals }
+  | {
+      kind: 'token_count';
+      timestamp: Date;
+      total: CodexTokenTotals;
+      /** Prompt size of the *last* request (`last_token_usage.input_tokens`,
+       *  cached subset included) — the real context size, unlike the cumulative
+       *  `total`. Analogue of Claude's input + cacheRead. */
+      contextTokens: number;
+    }
   | { kind: 'user_turn'; timestamp: Date; userTextLength: number }
   | null;
 
@@ -65,6 +73,38 @@ function codexUserTextLength(content: unknown): number {
     }
   }
   return total;
+}
+
+/** Prefixes Codex uses for the synthetic first-turn messages it injects as
+ *  `role: "user"` (environment blurb, AGENTS.md / user instructions). They are
+ *  model input, not something a human typed, so they must not count as turns. */
+const SYNTHETIC_TURN_PREFIXES = [
+  '<environment_context',
+  '<user_instructions',
+  '# AGENTS.md instructions for ',
+];
+
+function isSyntheticTurn(content: unknown): boolean {
+  let text: string | null = null;
+  if (typeof content === 'string') text = content;
+  else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (typeof block === 'string') {
+        text = block;
+        break;
+      }
+      if (block && typeof block === 'object') {
+        const b = block as Record<string, unknown>;
+        if (typeof b.text === 'string') {
+          text = b.text;
+          break;
+        }
+      }
+    }
+  }
+  if (text === null) return false;
+  const head = text.trimStart();
+  return SYNTHETIC_TURN_PREFIXES.some((p) => head.startsWith(p));
 }
 
 /** Parses one JSONL line into a normalized CodexRecord, or `null` for anything
@@ -119,6 +159,10 @@ export function parseCodexLine(line: string | Buffer): CodexRecord {
       typeof info.total_token_usage === 'object'
         ? (info.total_token_usage as Record<string, unknown>)
         : null;
+    const last =
+      info && info.last_token_usage && typeof info.last_token_usage === 'object'
+        ? (info.last_token_usage as Record<string, unknown>)
+        : null;
     if (!totals) return null;
     return {
       kind: 'token_count',
@@ -128,12 +172,14 @@ export function parseCodexLine(line: string | Buffer): CodexRecord {
         cachedInputTokens: intValue(totals.cached_input_tokens),
         outputTokens: intValue(totals.output_tokens),
       },
+      contextTokens: last ? intValue(last.input_tokens) : 0,
     };
   }
 
   if (type === 'response_item' && payload && payload.type === 'message') {
     if (payload.role !== 'user') return null;
     if (!tsValid) return null;
+    if (isSyntheticTurn(payload.content)) return null;
     return {
       kind: 'user_turn',
       timestamp: ts as Date,

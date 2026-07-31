@@ -68,3 +68,15 @@ test('costForEntry uses the injected resolver and cached-read 10% math', () => {
   // 600*1.25 + 100*10 + 400*(1.25*0.1) = 750 + 1000 + 50 = 1800 / 1e6
   assert.ok(Math.abs(cost - 1800 / 1_000_000) < 1e-12);
 });
+
+test('codex size tiers beat the bare codex match (gpt-5.1-codex-mini)', () => {
+  assert.deepStrictEqual(pricingForCodexModel('gpt-5.1-codex-mini'), {
+    inputPerMillion: 0.25,
+    outputPerMillion: 2,
+  });
+  // The full codex model is unaffected.
+  assert.deepStrictEqual(pricingForCodexModel('gpt-5.1-codex'), {
+    inputPerMillion: 1.25,
+    outputPerMillion: 10,
+  });
+});

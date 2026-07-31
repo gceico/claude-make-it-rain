@@ -123,3 +123,56 @@ test('non-token_count event_msg and malformed lines return null', () => {
     null
   );
 });
+
+test('token_count carries the per-request context size from last_token_usage', () => {
+  const rec = parseCodexLine(
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2026-07-31T10:00:00.000Z',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 90000,
+            cached_input_tokens: 80000,
+            output_tokens: 5000,
+          },
+          last_token_usage: {
+            input_tokens: 12000,
+            cached_input_tokens: 11000,
+            output_tokens: 300,
+          },
+          model_context_window: 258400,
+        },
+      },
+    })
+  );
+  assert.ok(rec && rec.kind === 'token_count');
+  // Cumulative totals stay cumulative; context is the LAST request's prompt.
+  assert.strictEqual(rec.total.inputTokens, 90000);
+  assert.strictEqual(rec.contextTokens, 12000);
+});
+
+test('Codex synthetic first-turn messages are not user turns', () => {
+  const synthetic = (text: string) =>
+    parseCodexLine(
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-31T10:00:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text }],
+        },
+      })
+    );
+  assert.strictEqual(
+    synthetic('<environment_context>\n  <cwd>/x</cwd>\n'),
+    null
+  );
+  assert.strictEqual(synthetic('<user_instructions>\ndo things\n'), null);
+  assert.strictEqual(synthetic('# AGENTS.md instructions for /x\n'), null);
+  // A real prompt still counts.
+  const rec = synthetic('fix the flaky test');
+  assert.ok(rec && rec.kind === 'user_turn');
+});
