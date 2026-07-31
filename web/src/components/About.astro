@@ -8,7 +8,13 @@
 //
 // The FAQ at the bottom renders from the shared FAQ array; Layout.astro emits
 // the same array as FAQPage JSON-LD, so schema and visible content stay in sync.
+//
+// Two tabs, "story" and "changelog". Both panels render server-side (SSR,
+// static build) so crawlers and AI answer engines index both regardless of
+// which one is visually hidden — same reasoning as the dialog itself
+// shipping its content closed. The tab script only toggles `hidden`.
 import { FAQ } from '../lib/faq';
+import { CHANGELOG } from '../lib/changelog';
 ---
 
 <dialog id='aboutDialog' class='about' aria-labelledby='aboutTitle'>
@@ -31,6 +37,37 @@ import { FAQ } from '../lib/faq';
 
     <h2 id='aboutTitle' class='about-h'>about.</h2>
 
+    <div class='about-tabs' role='tablist' aria-label='About sections'>
+      <button
+        type='button'
+        role='tab'
+        id='aboutTabStory'
+        aria-selected='true'
+        aria-controls='aboutPanelStory'
+        data-tab='story'
+        class='about-tab is-active'
+      >
+        story
+      </button>
+      <button
+        type='button'
+        role='tab'
+        id='aboutTabChangelog'
+        aria-selected='false'
+        aria-controls='aboutPanelChangelog'
+        data-tab='changelog'
+        class='about-tab'
+      >
+        changelog
+      </button>
+    </div>
+
+    <div
+      id='aboutPanelStory'
+      class='about-panel'
+      role='tabpanel'
+      aria-labelledby='aboutTabStory'
+    >
     <p>
       How to make fun of your own AI spend, and learn from it. <b
         >Make It Rain</b
@@ -125,11 +162,43 @@ import { FAQ } from '../lib/faq';
                 />
               </svg>
             </summary>
-            <p>{item.a}</p>
+            <p set:html={item.a} />
           </details>
         ))
       }
     </section>
+    </div>
+
+    <div
+      id='aboutPanelChangelog'
+      class='about-panel'
+      role='tabpanel'
+      aria-labelledby='aboutTabChangelog'
+      hidden
+    >
+      <ol class='about-changelog'>
+        {
+          CHANGELOG.map((entry) => (
+            <li class='about-changelog-item'>
+              <div class='about-changelog-meta'>
+                <span class='about-changelog-version'>v{entry.version}</span>
+                <span class='about-changelog-date'>{entry.date}</span>
+              </div>
+              <ul>
+                {entry.highlights.map((h) => <li>{h}</li>)}
+              </ul>
+            </li>
+          ))
+        }
+      </ol>
+      <p class='about-changelog-more'>
+        Full history on <a
+          href='https://github.com/gceico/claude-make-it-rain/blob/main/CHANGELOG.md'
+          target='_blank'
+          rel='noopener'>GitHub</a
+        >.
+      </p>
+    </div>
 
     <p class='about-sig'>
       <b>Gabriel Ceicoschi</b>
@@ -169,5 +238,22 @@ import { FAQ } from '../lib/faq';
     dialog.addEventListener('click', e => {
       if (e.target === dialog) dialog.close();
     });
+
+    // Tabs: swap which panel is visible/hidden and mirror it in
+    // aria-selected. Both panels stay in the DOM either way.
+    const tabs = dialog.querySelectorAll<HTMLButtonElement>('.about-tab');
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => {
+        for (const t of tabs) {
+          const active = t === tab;
+          t.classList.toggle('is-active', active);
+          t.setAttribute('aria-selected', String(active));
+          const panel = document.getElementById(
+            t.getAttribute('aria-controls') ?? ''
+          );
+          if (panel) panel.hidden = !active;
+        }
+      });
+    }
   }
 </script>

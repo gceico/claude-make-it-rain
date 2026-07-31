@@ -392,6 +392,71 @@ dialog.about[open]::backdrop { animation: about-fade .32s var(--ease-out) both; 
   line-height: 1.65;
 }
 
+/* ── About tabs ─────────────────────────────────────────────────────────
+   Story vs. changelog. Both panels render server-side; the script only
+   toggles `hidden`, so search/AI crawlers still see both. */
+.about-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 20px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.about-tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: 650 0.92rem/1 var(--sans);
+  text-transform: lowercase;
+  color: var(--muted);
+  padding: 9px 4px 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  transition: color .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.about-tab + .about-tab { margin-left: 14px; }
+.about-tab:hover { color: var(--muted-strong); }
+.about-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+.about-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.about-changelog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.about-changelog-item {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.about-changelog-item:first-child { border-top: 0; padding-top: 0; }
+.about-changelog-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.about-changelog-version {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+.about-changelog-date { color: var(--muted); font-size: 0.85rem; }
+.about-changelog-item ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted-strong);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.about-changelog-item li + li { margin-top: 4px; }
+.about-changelog-more {
+  margin: 16px 0 0 !important;
+  font-size: 0.88rem !important;
+  color: var(--muted);
+}
+
 /* ── Layout ─────────────────────────────────────────────────────────────
    .wrap / header.hero / .wordmark / .tagline / .pills moved to Tailwind
    utilities on the markup (index.astro / Hero.astro) — none of them are
