@@ -26,10 +26,14 @@ import * as os from 'os';
  *     if that fails, check ~/.local/bin/rtk (honoring RTK_INSTALL_DIR) —
  *     present-but-not-on-PATH is reported distinctly so the UI can tell the
  *     user to add ~/.local/bin to PATH rather than claiming "not installed".
- *   - Caveman and Ponytail are Claude Code PLUGINS, installed via the `claude`
- *     CLI's plugin subcommands (marketplace add, then plugin install) and
- *     detected via `claude plugin list` (with a filesystem fallback under
- *     ~/.claude/plugins).
+ *   - Caveman and Ponytail are installed via skills.sh (`npx skills add <repo>
+ *     --global --all`), which installs into ~/.agents/skills and symlinks into
+ *     EVERY detected agent dir — Claude Code and Codex both — which is why it
+ *     is preferred over the Claude-only plugin route in multi-agent setups.
+ *     Detection accepts any of: a skills.sh install (~/.agents/skills,
+ *     ~/.claude/skills, ~/.codex/skills, or the ~/.agents/.skill-lock.json
+ *     source), a Claude Code plugin (`claude plugin list` / ~/.claude/plugins),
+ *     so a user who installed them by hand either way is not asked again.
  *   - RTK's savings comes from `rtk gain --all --format json` — an
  *     authoritative saved-TOKEN count (summary.total_saved), priced to USD in
  *     score.ts's parseRtkGainJson.
@@ -108,18 +112,30 @@ export const TOOL_COMMANDS = {
     upgrade: ['brew', ['upgrade', 'rtk']] as [string, string[]],
   },
   caveman: {
+    skillsRepo: 'JuliusBrussee/caveman',
+    skillDirName: 'caveman',
     marketplaceRepo: 'JuliusBrussee/caveman',
     pluginId: 'caveman@caveman',
     marketplaceDirName: 'JuliusBrussee/caveman',
     pluginDirName: 'caveman',
   },
   ponytail: {
+    skillsRepo: 'DietrichGebert/ponytail',
+    skillDirName: 'ponytail',
     marketplaceRepo: 'DietrichGebert/ponytail',
     pluginId: 'ponytail@ponytail',
     marketplaceDirName: 'DietrichGebert/ponytail',
     pluginDirName: 'ponytail',
   },
 };
+
+/** skills.sh install argv for a repo: global scope, every skill, every detected
+ *  agent (Claude Code AND Codex), non-interactive. `--all` is skills.sh's own
+ *  shorthand for `--skill '*' --agent '*' -y`. Static but for the repo slug,
+ *  which is a literal from TOOL_COMMANDS — never user input. */
+export function skillsInstallArgv(repo: string): string[] {
+  return ['npx', '-y', 'skills', 'add', repo, '--global', '--all'];
+}
 
 /** The package-manager bin dirs a GUI/Finder-launched app is missing from its
  *  minimal PATH. Also the filesystem-fallback search dirs for a `rtk` binary. */
@@ -227,16 +243,46 @@ export async function detectRtk(
   return { installed: false, version: null };
 }
 
-/** Detect a Claude Code plugin (Caveman/Ponytail): prefer `claude plugin
- *  list` output containing the plugin id; fall back to a filesystem check
- *  under ~/.claude/plugins so detection still works if the CLI's list
- *  command output format changes. `homeDir` is injectable for tests. */
-export async function detectPlugin(
+/** Whether skills.sh installed this tool: the skill dir under ~/.agents/skills
+ *  (its store) or either agent dir it symlinks into, or — for a partial
+ *  install where the same-named skill was skipped — any lock entry whose
+ *  `source` is the tool's repo. Filesystem-only, never throws. */
+function detectSkillsInstall(tool: 'caveman' | 'ponytail', homeDir: string) {
+  const spec = TOOL_COMMANDS[tool];
+  const dirs = [
+    path.join(homeDir, '.agents', 'skills'),
+    path.join(homeDir, '.claude', 'skills'),
+    path.join(homeDir, '.codex', 'skills'),
+  ];
+  try {
+    if (dirs.some((d) => fs.existsSync(path.join(d, spec.skillDirName))))
+      return true;
+    const lockPath = path.join(homeDir, '.agents', '.skill-lock.json');
+    if (!fs.existsSync(lockPath)) return false;
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    return Object.values(lock?.skills ?? {}).some(
+      (entry) => (entry as { source?: string })?.source === spec.skillsRepo
+    );
+  } catch {
+    return false; // best-effort filesystem/JSON check only
+  }
+}
+
+/** Detect Caveman/Ponytail however the user got them: a skills.sh install
+ *  (the route this app installs by, and the one that covers Claude Code AND
+ *  Codex), else a Claude Code plugin — `claude plugin list` output containing
+ *  the plugin id, with a filesystem fallback under ~/.claude/plugins so
+ *  detection survives a change in the CLI's list output format. `homeDir` is
+ *  injectable for tests. */
+export async function detectAgentTool(
   tool: 'caveman' | 'ponytail',
   runner: CommandRunner,
   homeDir: string = os.homedir()
 ): Promise<DetectedTool> {
   const spec = TOOL_COMMANDS[tool];
+  if (detectSkillsInstall(tool, homeDir))
+    return { installed: true, version: null };
+
   const result = await tryRun(runner, ['claude', ['plugin', 'list']]);
   if (result && result.code === 0 && result.stdout.includes(spec.pluginId)) {
     return { installed: true, version: extractVersion(result.stdout) };
@@ -272,8 +318,8 @@ export async function detectTooling(
 ): Promise<ToolingDetection> {
   const [rtk, caveman, ponytail] = await Promise.all([
     detectRtk(runner),
-    detectPlugin('caveman', runner, homeDir),
-    detectPlugin('ponytail', runner, homeDir),
+    detectAgentTool('caveman', runner, homeDir),
+    detectAgentTool('ponytail', runner, homeDir),
   ]);
   return { rtk, caveman, ponytail };
 }
@@ -330,16 +376,10 @@ export async function installPlan(
       ]);
       steps.push(chooseRtkInstallStep(hasBrew, hasCargo));
     } else {
-      const spec = TOOL_COMMANDS[tool];
       steps.push({
         tool,
         label: TOOL_LABELS[tool],
-        argv: ['claude', 'plugin', 'marketplace', 'add', spec.marketplaceRepo],
-      });
-      steps.push({
-        tool,
-        label: TOOL_LABELS[tool],
-        argv: ['claude', 'plugin', 'install', spec.pluginId],
+        argv: skillsInstallArgv(TOOL_COMMANDS[tool].skillsRepo),
       });
     }
   }

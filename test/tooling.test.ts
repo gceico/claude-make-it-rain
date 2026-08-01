@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   detectRtk,
-  detectPlugin,
+  detectAgentTool,
   detectTooling,
   installPlan,
   runInstallPlan,
@@ -76,18 +76,18 @@ test('detectRtk: installed-but-off-PATH when the binary exists at RTK_INSTALL_DI
   }
 });
 
-test('detectPlugin: installed via `claude plugin list` output', async () => {
+test('detectAgentTool: installed via `claude plugin list` output', async () => {
   const runner: CommandRunner = async (cmd, args) => {
     if (cmd === 'claude' && args[0] === 'plugin' && args[1] === 'list') {
       return ok('installed plugins:\n  caveman@caveman v0.3.0\n  other@thing');
     }
     return fail();
   };
-  const result = await detectPlugin('caveman', runner, tmpRoot);
+  const result = await detectAgentTool('caveman', runner, tmpRoot);
   assert.strictEqual(result.installed, true);
 });
 
-test('detectPlugin: falls back to filesystem when CLI list has no match', async () => {
+test('detectAgentTool: falls back to filesystem when CLI list has no match', async () => {
   const runner: CommandRunner = async (cmd, args) => {
     if (cmd === 'claude' && args[0] === 'plugin' && args[1] === 'list') {
       return ok('installed plugins:\n  other@thing');
@@ -99,15 +99,51 @@ test('detectPlugin: falls back to filesystem when CLI list has no match', async 
     path.join(home, '.claude', 'plugins', TOOL_COMMANDS.ponytail.pluginDirName),
     { recursive: true }
   );
-  const result = await detectPlugin('ponytail', runner, home);
+  const result = await detectAgentTool('ponytail', runner, home);
   assert.strictEqual(result.installed, true);
 });
 
-test('detectPlugin: not installed when neither CLI nor filesystem has it', async () => {
+test('detectAgentTool: skills.sh install detected without any CLI call', async () => {
+  const runner: CommandRunner = async () => {
+    throw new Error('no command should run when the skill dir is present');
+  };
+  for (const dir of ['.agents', '.claude', '.codex']) {
+    const home = path.join(tmpRoot, `skills-home-${dir}`);
+    fs.mkdirSync(path.join(home, dir, 'skills', 'caveman'), {
+      recursive: true,
+    });
+    const result = await detectAgentTool('caveman', runner, home);
+    assert.strictEqual(result.installed, true, `${dir}/skills/caveman`);
+  }
+});
+
+test('detectAgentTool: skills.sh partial install detected via the lock file source', async () => {
+  const runner: CommandRunner = async () => ok('nothing relevant here');
+  const home = path.join(tmpRoot, 'lock-home');
+  fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, '.agents', '.skill-lock.json'),
+    JSON.stringify({
+      version: 3,
+      skills: {
+        'ponytail-audit': { source: TOOL_COMMANDS.ponytail.skillsRepo },
+      },
+    })
+  );
+  const result = await detectAgentTool('ponytail', runner, home);
+  assert.strictEqual(result.installed, true);
+  assert.strictEqual(
+    (await detectAgentTool('caveman', runner, home)).installed,
+    false,
+    'a lock file for another repo must not count'
+  );
+});
+
+test('detectAgentTool: not installed when neither CLI nor filesystem has it', async () => {
   const runner: CommandRunner = async () => ok('nothing relevant here');
   const home = path.join(tmpRoot, 'empty-home');
   fs.mkdirSync(home, { recursive: true });
-  const result = await detectPlugin('caveman', runner, home);
+  const result = await detectAgentTool('caveman', runner, home);
   assert.strictEqual(result.installed, false);
 });
 
@@ -173,35 +209,27 @@ test('installPlan: falls back to the universal installer when brew is absent', a
   assert.strictEqual(steps[0]!.argv[0], 'sh');
 });
 
-test('installPlan: caveman/ponytail are two static steps each (marketplace add, then install)', async () => {
+test('installPlan: caveman/ponytail install via skills.sh, globally, for every agent', async () => {
   const runner: CommandRunner = async () => fail();
   const steps = await installPlan(['caveman', 'ponytail'], runner);
-  assert.strictEqual(steps.length, 4);
+  assert.strictEqual(steps.length, 2);
   assert.deepStrictEqual(steps[0]!.argv, [
-    'claude',
-    'plugin',
-    'marketplace',
+    'npx',
+    '-y',
+    'skills',
     'add',
     'JuliusBrussee/caveman',
+    '--global',
+    '--all',
   ]);
   assert.deepStrictEqual(steps[1]!.argv, [
-    'claude',
-    'plugin',
-    'install',
-    'caveman@caveman',
-  ]);
-  assert.deepStrictEqual(steps[2]!.argv, [
-    'claude',
-    'plugin',
-    'marketplace',
+    'npx',
+    '-y',
+    'skills',
     'add',
     'DietrichGebert/ponytail',
-  ]);
-  assert.deepStrictEqual(steps[3]!.argv, [
-    'claude',
-    'plugin',
-    'install',
-    'ponytail@ponytail',
+    '--global',
+    '--all',
   ]);
 });
 
@@ -217,26 +245,22 @@ test('installPlan: every argv element is a plain static string (interpolation-fr
 });
 
 test('runInstallPlan: a failed step skips the remaining steps for that tool only', async () => {
-  const runner: CommandRunner = async (cmd, args) => {
-    if (args.includes('marketplace') && args.some((a) => a.includes('caveman')))
-      return fail();
-    return ok();
-  };
-  const steps = await installPlan(['caveman', 'ponytail'], runner);
+  const runner: CommandRunner = async (_cmd, args) =>
+    args.some((a) => a.includes('caveman')) ? fail() : ok();
+  const steps = [
+    { tool: 'caveman' as const, label: 'Caveman', argv: ['x', 'caveman'] },
+    { tool: 'caveman' as const, label: 'Caveman', argv: ['x', 'caveman', '2'] },
+    { tool: 'ponytail' as const, label: 'Ponytail', argv: ['x', 'ponytail'] },
+  ];
   const results = await runInstallPlan(steps, runner);
-  assert.strictEqual(results[0]!.ok, false, 'caveman marketplace add fails');
+  assert.strictEqual(results[0]!.ok, false, 'caveman first step fails');
   assert.strictEqual(
     results[1]!.ok,
     false,
-    'caveman install skipped after failure'
+    'caveman second step skipped after failure'
   );
   assert.strictEqual(results[1]!.result, null, 'skipped step never ran');
-  assert.strictEqual(
-    results[2]!.ok,
-    true,
-    'ponytail marketplace add unaffected'
-  );
-  assert.strictEqual(results[3]!.ok, true, 'ponytail install unaffected');
+  assert.strictEqual(results[2]!.ok, true, 'ponytail unaffected');
 });
 
 test('fetchRtkGainJson: parses valid JSON, returns null on non-zero exit or bad JSON', async () => {

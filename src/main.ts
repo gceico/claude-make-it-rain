@@ -706,8 +706,9 @@ async function refreshSavingsFromRtk({
 }
 
 /** Best-effort daily version-outdated check. Only RTK-via-brew exposes a clean
- *  signal (`brew outdated rtk`, exit 0 + non-empty = outdated); plugins have no
- *  clean `outdated` command, so we don't fake one. Fail-silent → "current". */
+ *  signal (`brew outdated rtk`, exit 0 + non-empty = outdated); skills.sh
+ *  has `skills update` but no dry-run "is anything outdated", so we don't fake
+ *  one for Caveman/Ponytail. Fail-silent → "current". */
 async function refreshToolingOutdated(): Promise<void> {
   if (!toolingState.rtk.installed) {
     toolingUpdateAvailable = false;
