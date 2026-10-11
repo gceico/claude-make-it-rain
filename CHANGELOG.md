@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-10-11
+
+### Added
+
+- **New Optimize habit: bloated CLAUDE.md / AGENTS.md.** Flags when the
+  instructions an agent loads into every request exceed ~200 lines, since every
+  line is re-sent (and billed) on each turn. For Claude Code it resolves the
+  effective chain — global `~/.claude/CLAUDE.md`, project `CLAUDE.md` /
+  `.claude/CLAUDE.md` / `CLAUDE.local.md` up the tree, falling back to
+  `AGENTS.md` when a project has no CLAUDE.md (as Claude Code does), plus
+  recursive `@` imports. For Codex it reads the exact AGENTS.md block Codex
+  logged for the session.
+
+### Changed
+
+- Falling money now burns up at the end of its fall (a bottom-up dissolve with
+  an ember glow) instead of fading out.
+
 ## [1.0.16] - 2026-10-11
 
 ### Changed
