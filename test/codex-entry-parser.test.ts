@@ -56,8 +56,32 @@ test('parses token_count from info.total_token_usage (input includes cached)', (
   assert.ok(rec && rec.kind === 'token_count');
   assert.strictEqual(rec.total.inputTokens, 1000);
   assert.strictEqual(rec.total.cachedInputTokens, 400);
+  // Older Codex builds don't log cache writes: read as 0.
+  assert.strictEqual(rec.total.cacheWriteInputTokens, 0);
   // output already includes reasoning tokens; we keep it as-is (no double add).
   assert.strictEqual(rec.total.outputTokens, 200);
+});
+
+test('token_count reads cache_write_input_tokens when present', () => {
+  const rec = parseCodexLine(
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: ts,
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 1000,
+            cached_input_tokens: 400,
+            cache_write_input_tokens: 100,
+            output_tokens: 200,
+          },
+        },
+      },
+    })
+  );
+  assert.ok(rec && rec.kind === 'token_count');
+  assert.strictEqual(rec.total.cacheWriteInputTokens, 100);
 });
 
 test('token_count with null info is skipped', () => {

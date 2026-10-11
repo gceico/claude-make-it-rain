@@ -35,7 +35,13 @@ const turn = (model: string) =>
     payload: { model },
   });
 const tc = (
-  cum: { input: number; cached?: number; output?: number; context?: number },
+  cum: {
+    input: number;
+    cached?: number;
+    write?: number;
+    output?: number;
+    context?: number;
+  },
   ts = todayISO
 ) =>
   JSON.stringify({
@@ -47,6 +53,7 @@ const tc = (
         total_token_usage: {
           input_tokens: cum.input,
           cached_input_tokens: cum.cached || 0,
+          cache_write_input_tokens: cum.write || 0,
           output_tokens: cum.output || 0,
           reasoning_output_tokens: 0,
           total_tokens: cum.input + (cum.output || 0),
@@ -86,6 +93,12 @@ function snapshotOf(root: string) {
   m.tick(true);
   return m.buildSnapshot();
 }
+
+const approxEq = (actual: number, expected: number) =>
+  assert.ok(
+    Math.abs(actual - expected) < 1e-9,
+    `expected ${expected}, got ${actual}`
+  );
 
 const CODEX_IN = 1.25 / 1_000_000; // gpt-5-codex input $/token
 const CODEX_OUT = 10 / 1_000_000;
@@ -134,6 +147,38 @@ test('cached input is billed at 10% of the input rate', () => {
   assert.ok(Math.abs(snap.totalCostUSD - expected) < 1e-12);
   assert.strictEqual(snap.inputTokens, 600);
   assert.strictEqual(snap.cachedInputTokens, 400);
+});
+
+test('cache writes bill at 1.25x input and come out of plain input', () => {
+  const root = freshRoot();
+  writeSession(root, 's', [
+    turn('gpt-6-sol'),
+    tc({ input: 1000, cached: 400, write: 100 }),
+  ]);
+  const snap = snapshotOf(root);
+  // 500 plain * 2 + 400 cached * 0.2 + 100 written * 2.5
+  const expected = (500 * 2 + 400 * 0.2 + 100 * 2.5) / 1_000_000;
+  assert.ok(Math.abs(snap.totalCostUSD - expected) < 1e-12);
+});
+
+test('long-context tier follows each request, not the day total', () => {
+  const root = freshRoot();
+  // Three 200K-prompt requests: 600K cumulative, but none crosses 272K.
+  writeSession(root, 'a', [
+    turn('gpt-6-sol'),
+    tc({ input: 200_000, context: 200_000 }),
+    tc({ input: 400_000, context: 200_000 }),
+    tc({ input: 600_000, context: 200_000 }),
+  ]);
+  approxEq(snapshotOf(root).totalCostUSD, (600_000 * 2) / 1_000_000);
+
+  // One 300K-prompt request does cross it: input at 2x.
+  const root2 = freshRoot();
+  writeSession(root2, 'b', [
+    turn('gpt-6-sol'),
+    tc({ input: 300_000, context: 300_000 }),
+  ]);
+  approxEq(snapshotOf(root2).totalCostUSD, (300_000 * 4) / 1_000_000);
 });
 
 test('output tokens billed at the output rate', () => {

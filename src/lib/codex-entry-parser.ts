@@ -26,11 +26,14 @@ import { hashProjectKey } from './entry-parser';
 const intValue = (v: unknown): number =>
   typeof v === 'number' && isFinite(v) ? Math.trunc(v) : 0;
 
-/** Cumulative token totals as logged by Codex (input includes the cached
- *  subset; output already includes reasoning tokens). */
+/** Cumulative token totals as logged by Codex (input includes the cached and
+ *  cache-write subsets; output already includes reasoning tokens). */
 export interface CodexTokenTotals {
   inputTokens: number;
   cachedInputTokens: number;
+  /** Prompt-cache writes (gpt-5.6 / gpt-6 bill them at 1.25x input). Older
+   *  Codex builds don't log the field, so it reads as 0. */
+  cacheWriteInputTokens: number;
   outputTokens: number;
 }
 
@@ -170,6 +173,7 @@ export function parseCodexLine(line: string | Buffer): CodexRecord {
       total: {
         inputTokens: intValue(totals.input_tokens),
         cachedInputTokens: intValue(totals.cached_input_tokens),
+        cacheWriteInputTokens: intValue(totals.cache_write_input_tokens),
         outputTokens: intValue(totals.output_tokens),
       },
       contextTokens: last ? intValue(last.input_tokens) : 0,

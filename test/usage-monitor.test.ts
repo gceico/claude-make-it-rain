@@ -61,44 +61,42 @@ function entry({
 
 // ── Pricing unit checks ──────────────────────────────────────────────────────
 // Current model coverage, verified against Anthropic's published per-model
-// pricing (2026-07). Keeps the tool from drifting away from `/cost` / ccusage.
+// pricing (2026-10-11). Keeps the tool from drifting away from `/cost` / ccusage.
 test('pricing model coverage + cost math', () => {
-  assert.deepStrictEqual(pricingForModel('claude-fable-5'), {
-    inputPerMillion: 10,
-    outputPerMillion: 50,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-mythos-5'), {
-    inputPerMillion: 10,
-    outputPerMillion: 50,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-opus-5'), {
-    inputPerMillion: 5,
-    outputPerMillion: 25,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-opus-4-8'), {
-    inputPerMillion: 5,
-    outputPerMillion: 25,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-opus-4-7'), {
-    inputPerMillion: 5,
-    outputPerMillion: 25,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-opus-4-6'), {
-    inputPerMillion: 5,
-    outputPerMillion: 25,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-sonnet-5'), {
-    inputPerMillion: 3,
-    outputPerMillion: 15,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-sonnet-4-6'), {
-    inputPerMillion: 3,
-    outputPerMillion: 15,
-  });
-  assert.deepStrictEqual(pricingForModel('claude-haiku-4-5'), {
-    inputPerMillion: 1,
-    outputPerMillion: 5,
-  });
+  const rates = (model: string) => {
+    const p = pricingForModel(model);
+    return [
+      p.inputPerMillion,
+      p.outputPerMillion,
+      p.cacheReadMultiplier ?? 0.1,
+    ];
+  };
+  // [input, output, cache-read multiplier]
+  assert.deepStrictEqual(rates('claude-fable-5-1'), [10, 50, 0.025]);
+  assert.deepStrictEqual(rates('claude-mythos-5-1'), [10, 50, 0.025]);
+  assert.deepStrictEqual(rates('claude-fable-5'), [10, 50, 0.1]);
+  assert.deepStrictEqual(rates('claude-mythos-5'), [10, 50, 0.1]);
+  assert.deepStrictEqual(rates('claude-opus-5-5'), [4, 20, 0.05]);
+  assert.deepStrictEqual(rates('claude-opus-5'), [5, 25, 0.1]);
+  assert.deepStrictEqual(rates('claude-opus-4-8'), [5, 25, 0.1]);
+  assert.deepStrictEqual(rates('claude-opus-4-7'), [5, 25, 0.1]);
+  assert.deepStrictEqual(rates('claude-opus-4-6'), [5, 25, 0.1]);
+  assert.deepStrictEqual(rates('claude-opus-4-5-20251101'), [5, 25, 0.1]);
+  assert.deepStrictEqual(rates('claude-sonnet-5-5'), [2, 10, 0.05]);
+  // Sonnet 5's $2/$10 launch price is now its standard price.
+  assert.deepStrictEqual(rates('claude-sonnet-5'), [2, 10, 0.1]);
+  assert.deepStrictEqual(rates('claude-sonnet-4-6'), [3, 15, 0.1]);
+  assert.deepStrictEqual(rates('claude-sonnet-4-5-20250929'), [3, 15, 0.1]);
+  assert.deepStrictEqual(rates('claude-haiku-5-5'), [0.1, 0.5, 0.1]);
+  assert.deepStrictEqual(rates('claude-haiku-4-5-20251001'), [1, 5, 0.1]);
+  // Fast mode exists only on Opus 5.5 / 5 / 4.8.
+  assert.strictEqual(pricingForModel('claude-opus-5-5').fastMultiplier, 2);
+  assert.strictEqual(pricingForModel('claude-opus-5').fastMultiplier, 2);
+  assert.strictEqual(pricingForModel('claude-opus-4-8').fastMultiplier, 2);
+  assert.strictEqual(
+    pricingForModel('claude-opus-4-7').fastMultiplier,
+    undefined
+  );
   // Haiku 3.5 ($0.8/$4) and Claude 3 Haiku ($0.25/$1.25) are distinct tiers;
   // the real ids are 'claude-3-5-haiku-*' and 'claude-3-haiku-*'.
   assert.deepStrictEqual(pricingForModel('claude-3-5-haiku-20241022'), {
@@ -160,7 +158,7 @@ test('pricing model coverage + cost math', () => {
         cacheCreationInputTokens: 0,
         cacheCreationBreakdown: null,
       },
-      'claude-sonnet-5'
+      'claude-sonnet-4-6'
     ),
     18,
     'sonnet in+out'
@@ -175,7 +173,7 @@ test('pricing model coverage + cost math', () => {
         cacheCreationInputTokens: 0,
         cacheCreationBreakdown: null,
       },
-      'claude-sonnet-5'
+      'claude-sonnet-4-6'
     ),
     0.3,
     'cache read'
@@ -193,7 +191,7 @@ test('pricing model coverage + cost math', () => {
           ephemeral1hInputTokens: 1e6,
         },
       },
-      'claude-sonnet-5'
+      'claude-sonnet-4-6'
     ),
     3 * 1.25 + 3 * 2,
     'cache creation breakdown'
@@ -208,10 +206,84 @@ test('pricing model coverage + cost math', () => {
         cacheCreationInputTokens: 1e6,
         cacheCreationBreakdown: null,
       },
-      'claude-sonnet-5'
+      'claude-sonnet-4-6'
     ),
     3 * 1.25,
     'cache creation without breakdown = 5m rate'
+  );
+
+  const usage = (o: Partial<Parameters<typeof costForEntry>[0]>) => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheCreationBreakdown: null,
+    ...o,
+  });
+  // Per-model cache-read multipliers: Opus 5.5 0.05x, Fable 5.1 0.025x.
+  approx(
+    costForEntry(usage({ cacheReadInputTokens: 1e6 }), 'claude-opus-5-5'),
+    0.2,
+    'opus 5.5 cache read = $0.20'
+  );
+  approx(
+    costForEntry(usage({ cacheReadInputTokens: 1e6 }), 'claude-fable-5-1'),
+    0.25,
+    'fable 5.1 cache read = $0.25'
+  );
+  approx(
+    costForEntry(usage({ cacheReadInputTokens: 1e6 }), 'claude-fable-5'),
+    1,
+    'fable 5 cache read = $1'
+  );
+  // Haiku 5.5: base rates up to 100K prompt tokens, $0.50/$2.50 above —
+  // cache reads count toward the threshold and reprice too.
+  approx(
+    costForEntry(
+      usage({ inputTokens: 100_000, outputTokens: 1e6 }),
+      'claude-haiku-5-5'
+    ),
+    0.01 + 0.5,
+    'haiku 5.5 at the threshold stays on base rates'
+  );
+  approx(
+    costForEntry(
+      usage({
+        inputTokens: 1_000,
+        cacheReadInputTokens: 200_000,
+        outputTokens: 1e6,
+      }),
+      'claude-haiku-5-5'
+    ),
+    (1_000 * 0.5 + 200_000 * 0.05) / 1e6 + 2.5,
+    'haiku 5.5 over 100K reprices the whole request'
+  );
+  // Fast mode: 2x every category on models that have it; ignored elsewhere.
+  approx(
+    costForEntry(
+      usage({
+        inputTokens: 1e6,
+        outputTokens: 1e6,
+        cacheReadInputTokens: 1e6,
+        speed: 'fast',
+      }),
+      'claude-opus-5-5'
+    ),
+    2 * (4 + 20 + 0.2),
+    'opus 5.5 fast = 2x'
+  );
+  approx(
+    costForEntry(usage({ inputTokens: 1e6, speed: 'fast' }), 'claude-opus-4-6'),
+    5,
+    'fast on a model without fast mode bills standard'
+  );
+  approx(
+    costForEntry(
+      usage({ inputTokens: 1e6, speed: 'standard' }),
+      'claude-opus-5'
+    ),
+    5,
+    'standard speed = base'
   );
 });
 
@@ -224,7 +296,7 @@ test('initial scan (dedup, day filter, type filter, cost math)', () => {
     // counted: 100k in / 10k out on sonnet = 0.3 + 0.15 = $0.45
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'r1',
       msgId: 'm1',
       input: 100_000,
@@ -233,7 +305,7 @@ test('initial scan (dedup, day filter, type filter, cost math)', () => {
     // duplicate of the same requestId:messageId — must be ignored
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'r1',
       msgId: 'm1',
       input: 100_000,
@@ -242,7 +314,7 @@ test('initial scan (dedup, day filter, type filter, cost math)', () => {
     // yesterday — must be ignored
     entry({
       ts: yesterdayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'r2',
       msgId: 'm2',
       input: 500_000,
@@ -251,7 +323,7 @@ test('initial scan (dedup, day filter, type filter, cost math)', () => {
     // non-assistant — must be ignored
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'r3',
       msgId: 'm3',
       input: 1e6,
@@ -296,7 +368,7 @@ test('incremental append + partial-line buffering', () => {
   const appended =
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'r5',
       msgId: 'm5',
       input: 0,
@@ -356,7 +428,7 @@ test('deterministic dedup on re-read', () => {
     requestId: 'rr1',
     uuid: 'stable-uuid-1',
     message: {
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       usage: { input_tokens: 0, output_tokens: 1_000_000 },
     },
   });
@@ -364,7 +436,7 @@ test('deterministic dedup on re-read', () => {
   // forcing the offset-reset / re-read path in processFile.
   const filler = entry({
     ts: todayISO,
-    model: 'claude-sonnet-5',
+    model: 'claude-sonnet-4-6',
     reqId: 'rr2',
     msgId: 'mm2',
     input: 0,
@@ -405,7 +477,7 @@ test('midnight rollover resets state without double-counting today', () => {
       // yesterday — ignored by the day filter
       entry({
         ts: yesterdayISO,
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-4-6',
         reqId: 'y1',
         msgId: 'ym1',
         input: 500_000,
@@ -414,7 +486,7 @@ test('midnight rollover resets state without double-counting today', () => {
       // today — 100k in / 10k out on sonnet = 0.3 + 0.15 = $0.45
       entry({
         ts: todayISO,
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-4-6',
         reqId: 't1',
         msgId: 'tm1',
         input: 100_000,
@@ -466,7 +538,7 @@ test('midnight rollover with no new spend emits a zeroed onUpdate', () => {
     file4,
     entry({
       ts: yesterdayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'y1',
       msgId: 'ym1',
       input: 500_000,
@@ -534,7 +606,7 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
       sessionId,
       message: {
         id: reqId + 'm',
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-4-6',
         usage: {
           input_tokens: input,
           output_tokens: 0,
@@ -621,7 +693,7 @@ test('counts Cowork session transcripts alongside the CLI ones', () => {
     path.join(cliProject, 's.jsonl'),
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'cw-cli',
       msgId: 'cw-cli',
       input: 0,
@@ -645,7 +717,7 @@ test('counts Cowork session transcripts alongside the CLI ones', () => {
     path.join(coworkProject, 't.jsonl'),
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'cw-agent',
       msgId: 'cw-agent',
       input: 0,
@@ -659,7 +731,7 @@ test('counts Cowork session transcripts alongside the CLI ones', () => {
     path.join(stray, 'nope.jsonl'),
     entry({
       ts: todayISO,
-      model: 'claude-sonnet-5',
+      model: 'claude-sonnet-4-6',
       reqId: 'cw-stray',
       msgId: 'cw-stray',
       input: 0,

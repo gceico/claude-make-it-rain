@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-10-11
+
+### Changed
+
+- **Model prices refreshed for both providers** (verified 2026-10-11 against
+  Anthropic's and OpenAI's published pricing, and LiteLLM's table).
+  - Claude: added Opus 5.5 ($4/$20), Sonnet 5.5 ($2/$10), Haiku 5.5 and Fable /
+    Mythos 5.1. Sonnet 5 now bills at $2/$10, its permanent price (it was still
+    on the old $3/$15). Before this, Opus 5.5 fell through to the $5/$25
+    default.
+  - Codex: added gpt-6-sol / gpt-6.1-sol / gpt-6-astra / gpt-6-luna and the
+    `codex-auto-review` reviewer (billed at gpt-5.6-luna rates, an estimate).
+    Corrected gpt-5.6 Sol/Terra/Luna and gpt-5.4, which had drifted. Added the
+    -pro, o-series and gpt-4.1 ids. Unknown ids now fall back to gpt-6-sol
+    rates.
+- Cache reads are now priced per model rather than always at 10% of input:
+  0.05x on Opus 5.5, Sonnet 5.5 and gpt-6.1-sol; 0.025x on Fable / Mythos 5.1;
+  0.25x on the o-series and gpt-4.1.
+- Tiered pricing: Haiku 5.5 prompts over 100K tokens and OpenAI gpt-5.4+
+  prompts over 272K tokens bill at the higher rates. For Codex this is judged
+  per request, not on the day's running total.
+- Fast-mode requests (`usage.speed: "fast"` on Opus 5.5 / 5 / 4.8) bill at 2x.
+- Codex prompt-cache writes (`cache_write_input_tokens`, gpt-5.6 / gpt-6) bill
+  at 1.25x input instead of as plain input.
+
+### Fixed
+
+- History tests no longer scan the developer's real `~/.codex` and Cowork
+  directories (they were slow and could time out).
+
+## [1.0.5 – 1.0.15]
+
 ### Added
 
 - **OpenAI Codex spend is now tracked alongside Claude Code.** The app reads
