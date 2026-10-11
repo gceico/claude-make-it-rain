@@ -12,6 +12,9 @@ import {
   ponytailMissing,
   giantPaste,
   rageRetry,
+  bloatedClaudeMd,
+  bloatedAgentsMd,
+  bigFileReads,
   modelSplit,
   cacheRate,
   estimateAccuracy,
@@ -44,6 +47,9 @@ function baseInput(overrides: Partial<HabitInput> = {}): HabitInput {
     toolingState: noTools(),
     userTurns: [],
     sessionGaps: [],
+    fileReads: [],
+    claudeMd: [],
+    agentsMd: 0,
     ...overrides,
   };
 }
@@ -224,6 +230,82 @@ test('rage-retry: does not trigger when similar turns are far apart in time', ()
   assert.strictEqual(r.triggered, false);
 });
 
+test('bloated-claude-md: triggers when a project chain exceeds 200 lines', () => {
+  const r = bloatedClaudeMd(
+    baseInput({ claudeMd: [{ projectKey: 'p1', totalLines: 340 }] })
+  );
+  assert.strictEqual(r.triggered, true);
+  assert.strictEqual(r.count, 1);
+  assert.ok(r.coachCopy.includes('340'));
+});
+
+test('bloated-claude-md: does not trigger at/under 200 lines', () => {
+  const r200 = bloatedClaudeMd(
+    baseInput({ claudeMd: [{ projectKey: 'p1', totalLines: 200 }] })
+  );
+  assert.strictEqual(r200.triggered, false, 'exactly 200 lines is not over');
+  const r201 = bloatedClaudeMd(
+    baseInput({ claudeMd: [{ projectKey: 'p1', totalLines: 201 }] })
+  );
+  assert.strictEqual(r201.triggered, true, '201 lines is over');
+});
+
+test('bloated-claude-md: not triggered copy shows the largest chain seen', () => {
+  const r = bloatedClaudeMd(
+    baseInput({
+      claudeMd: [
+        { projectKey: 'p1', totalLines: 40 },
+        { projectKey: 'p2', totalLines: 187 },
+      ],
+    })
+  );
+  assert.strictEqual(r.triggered, false);
+  assert.ok(r.coachCopy.includes('187'));
+});
+
+test('bloated-agents-md: triggers when Codex loaded over 200 lines of AGENTS.md', () => {
+  const r = bloatedAgentsMd(baseInput({ agentsMd: 340 }));
+  assert.strictEqual(r.triggered, true);
+  assert.strictEqual(r.count, 1);
+  assert.ok(r.coachCopy.includes('340'));
+});
+
+test('bloated-agents-md: does not trigger at/under 200 lines', () => {
+  const r200 = bloatedAgentsMd(baseInput({ agentsMd: 200 }));
+  assert.strictEqual(r200.triggered, false, 'exactly 200 lines is not over');
+  const r201 = bloatedAgentsMd(baseInput({ agentsMd: 201 }));
+  assert.strictEqual(r201.triggered, true, '201 lines is over');
+});
+
+test('bloated-agents-md: not-triggered copy shows the line count, including zero', () => {
+  const r = bloatedAgentsMd(baseInput({ agentsMd: 0 }));
+  assert.strictEqual(r.triggered, false);
+  assert.ok(r.coachCopy.includes('0'));
+});
+
+test('big-file-reads: triggers on a Read of 500+ lines', () => {
+  const r = bigFileReads(
+    baseInput({
+      fileReads: [
+        { sessionId: 's1', lines: 499, ext: '.ts', timestampMs: 0 },
+        { sessionId: 's1', lines: 1200, ext: '.ts', timestampMs: 1 },
+      ],
+    })
+  );
+  assert.strictEqual(r.triggered, true);
+  assert.strictEqual(r.count, 1, 'only the 500+ read counts');
+  assert.ok(r.coachCopy.includes('1.2k'), r.coachCopy);
+});
+
+test('big-file-reads: does not trigger under 500 lines', () => {
+  const r = bigFileReads(
+    baseInput({
+      fileReads: [{ sessionId: 's1', lines: 499, ext: '.ts', timestampMs: 0 }],
+    })
+  );
+  assert.strictEqual(r.triggered, false);
+});
+
 test('awareness facts are always triggered (never "bad")', () => {
   const snap = emptyDailySnapshot();
   snap.costUSD = 10;
@@ -235,9 +317,9 @@ test('awareness facts are always triggered (never "bad")', () => {
   assert.strictEqual(estimateAccuracy(input).triggered, true);
 });
 
-test('runHabitDetectors returns all ten+ results in order', () => {
+test('runHabitDetectors returns all fifteen results in order', () => {
   const results = runHabitDetectors(baseInput());
-  assert.strictEqual(results.length, 12);
+  assert.strictEqual(results.length, 15);
   assert.strictEqual(results[0]!.id, 'caching-off');
 });
 

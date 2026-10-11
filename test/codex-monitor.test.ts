@@ -268,6 +268,71 @@ test('mixed session: per-model split, user turns (length only), sessions + max c
   assert.strictEqual(snap.sessions.maxContextTokens, 500);
 });
 
+test('AGENTS.md instructions block: line count surfaces as agentsMdLines, never as a user turn', () => {
+  const root = freshRoot();
+  const agentsMdText =
+    '# AGENTS.md instructions for /home/me/secret-project\n\n' +
+    'one\ntwo\nthree\nfour\n';
+  writeSession(root, 's', [
+    meta('s', '/home/me/secret-project'),
+    turn('gpt-5-codex'),
+    userMsg(agentsMdText), // second line of a real rollout, in practice
+    tc({ input: 200, output: 100 }),
+    userMsg('a real prompt'),
+  ]);
+  const snap = snapshotOf(root);
+
+  // header + blank + 4 body lines = 6.
+  assert.strictEqual(snap.agentsMdLines, 6);
+  assert.strictEqual(
+    snap.userTurns.length,
+    1,
+    'AGENTS.md block is not double-counted as a user turn'
+  );
+  assert.strictEqual(snap.userTurns[0]!.userTextLength, 'a real prompt'.length);
+  assert.ok(
+    !JSON.stringify(snap).includes('secret-project'),
+    'the raw project path must never appear in the snapshot'
+  );
+});
+
+test('AGENTS.md block still counts for a session STARTED earlier and resumed today', () => {
+  // Codex writes the block once, at session start, so a resumed session carries
+  // an older timestamp on it while its instructions are still loaded into every
+  // request billed today. Verified against real rollouts: 2 of 3 local sessions
+  // carrying a block had it dated before the day their spend landed. Date-gating
+  // this record (as user_turn/token_count are) would drop the signal for them.
+  const root = freshRoot();
+  writeSession(root, 's', [
+    meta('s'),
+    turn('gpt-5-codex'),
+    userMsg('# AGENTS.md instructions for /proj\n\na\nb\nc\n', yesterdayISO),
+    userMsg('a prompt today'),
+    tc({ input: 200, output: 100 }),
+  ]);
+  const snap = snapshotOf(root);
+
+  // header + blank + 3 body lines = 5, despite the older timestamp.
+  assert.strictEqual(snap.agentsMdLines, 5);
+  assert.strictEqual(
+    snap.userTurns.length,
+    1,
+    "yesterday's block is still not a user turn"
+  );
+});
+
+test('agentsMdLines defaults to 0 when no session has an AGENTS.md block', () => {
+  const root = freshRoot();
+  writeSession(root, 's', [
+    meta('s'),
+    turn('gpt-5-codex'),
+    userMsg('just a prompt'),
+    tc({ input: 100 }),
+  ]);
+  const snap = snapshotOf(root);
+  assert.strictEqual(snap.agentsMdLines, 0);
+});
+
 test('onInitialScanComplete and onUpdate both fire on the first tick', () => {
   const root = freshRoot();
   writeSession(root, 's', [turn('gpt-5-codex'), tc({ input: 100 })]);

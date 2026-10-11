@@ -17,7 +17,14 @@ import { hashProjectKey } from './entry-parser';
  *  - `event_msg` / `payload.type === "token_count"`: the running
  *    `total_token_usage` for the session so far (diff successive events).
  *  - `response_item` user `message`: a user prompt (we keep only its text
- *    length, never the text — see codexUserTextLength).
+ *    length, never the text — see codexUserTextLength). If the message is the
+ *    injected AGENTS.md instructions block instead (Codex writes the exact
+ *    text it loaded into the transcript, once per session, prefixed
+ *    `# AGENTS.md instructions for <path>`), it is classified as `agents_md`
+ *    and we keep only its LINE COUNT — never the text, never the path in the
+ *    header — same privacy stance as codexUserTextLength. It is deliberately
+ *    NOT also emitted as a `user_turn`: it's an injected instruction block,
+ *    not something a human typed.
  *
  * The stateful stitching (model attribution, cumulative deltas) lives in the
  * CodexMonitor; this module only classifies and extracts one line.
@@ -54,6 +61,7 @@ export type CodexRecord =
       contextTokens: number;
     }
   | { kind: 'user_turn'; timestamp: Date; userTextLength: number }
+  | { kind: 'agents_md'; timestamp: Date; lines: number }
   | null;
 
 /** Sum the character length of every `{..., text: string}` content block (or a
@@ -79,35 +87,45 @@ function codexUserTextLength(content: unknown): number {
 }
 
 /** Prefixes Codex uses for the synthetic first-turn messages it injects as
- *  `role: "user"` (environment blurb, AGENTS.md / user instructions). They are
- *  model input, not something a human typed, so they must not count as turns. */
-const SYNTHETIC_TURN_PREFIXES = [
-  '<environment_context',
-  '<user_instructions',
-  '# AGENTS.md instructions for ',
-];
+ *  `role: "user"` (environment blurb, user instructions). They are model
+ *  input, not something a human typed, so they must not count as turns.
+ *  AGENTS.md gets its own prefix/kind below (agents_md) instead of living in
+ *  this list, since unlike these it carries a countable signal (line count). */
+const SYNTHETIC_TURN_PREFIXES = ['<environment_context', '<user_instructions'];
 
-function isSyntheticTurn(content: unknown): boolean {
-  let text: string | null = null;
-  if (typeof content === 'string') text = content;
-  else if (Array.isArray(content)) {
-    for (const block of content) {
-      if (typeof block === 'string') {
-        text = block;
-        break;
-      }
-      if (block && typeof block === 'object') {
-        const b = block as Record<string, unknown>;
-        if (typeof b.text === 'string') {
-          text = b.text;
-          break;
-        }
-      }
+/** The literal header Codex writes ahead of the AGENTS.md instructions block
+ *  it loaded for a session (see the module doc comment). */
+const AGENTS_MD_PREFIX = '# AGENTS.md instructions for ';
+
+/** Extracts the first text block's raw string from a response_item message's
+ *  `content` (plain string, or an array of blocks each possibly carrying a
+ *  string `text`). Used only to classify the message (prefix check / line
+ *  count) — the string is never retained on the returned CodexRecord. */
+function firstBlockText(content: unknown): string | null {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block === 'string') return block;
+    if (block && typeof block === 'object') {
+      const b = block as Record<string, unknown>;
+      if (typeof b.text === 'string') return b.text;
     }
   }
+  return null;
+}
+
+function isSyntheticTurn(text: string | null): boolean {
   if (text === null) return false;
   const head = text.trimStart();
   return SYNTHETIC_TURN_PREFIXES.some((p) => head.startsWith(p));
+}
+
+/** Line count of a text block, mirroring lib/claude-md.ts's countLines (a
+ *  trailing newline doesn't count as an extra empty line). */
+function countTextLines(text: string): number {
+  if (text === '') return 0;
+  const trimmed = text.endsWith('\n') ? text.slice(0, -1) : text;
+  return trimmed.length === 0 ? 0 : trimmed.split('\n').length;
 }
 
 /** Parses one JSONL line into a normalized CodexRecord, or `null` for anything
@@ -183,7 +201,15 @@ export function parseCodexLine(line: string | Buffer): CodexRecord {
   if (type === 'response_item' && payload && payload.type === 'message') {
     if (payload.role !== 'user') return null;
     if (!tsValid) return null;
-    if (isSyntheticTurn(payload.content)) return null;
+    const text = firstBlockText(payload.content);
+    if (text !== null && text.trimStart().startsWith(AGENTS_MD_PREFIX)) {
+      return {
+        kind: 'agents_md',
+        timestamp: ts as Date,
+        lines: countTextLines(text),
+      };
+    }
+    if (isSyntheticTurn(text)) return null;
     return {
       kind: 'user_turn',
       timestamp: ts as Date,

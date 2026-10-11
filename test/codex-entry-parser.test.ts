@@ -195,8 +195,56 @@ test('Codex synthetic first-turn messages are not user turns', () => {
     null
   );
   assert.strictEqual(synthetic('<user_instructions>\ndo things\n'), null);
-  assert.strictEqual(synthetic('# AGENTS.md instructions for /x\n'), null);
   // A real prompt still counts.
   const rec = synthetic('fix the flaky test');
   assert.ok(rec && rec.kind === 'user_turn');
+});
+
+test('Codex AGENTS.md instructions block: classified as agents_md, line count only, never text/path', () => {
+  const text =
+    '# AGENTS.md instructions for /Users/me/secret-project\n\n' +
+    'Line one\nLine two\nLine three\n';
+  const rec = parseCodexLine(
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-31T10:00:00.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text }],
+      },
+    })
+  );
+  assert.ok(rec && rec.kind === 'agents_md');
+  if (!rec || rec.kind !== 'agents_md') throw new Error('unreachable');
+  assert.strictEqual(rec.lines, 5);
+  assert.ok(
+    !JSON.stringify(rec).includes('secret-project'),
+    'the raw path in the header must never appear on the parsed record'
+  );
+  assert.ok(
+    !JSON.stringify(rec).includes('Line one'),
+    'the instruction text must never appear on the parsed record'
+  );
+});
+
+test('Codex AGENTS.md block is NOT also emitted as a user_turn', () => {
+  // Real logs show this is the second line of a rollout, exactly once per
+  // session; it must classify as agents_md only, never double-count as both.
+  const rec = parseCodexLine(
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-31T10:00:00.000Z',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '# AGENTS.md instructions for /x\n' },
+        ],
+      },
+    })
+  );
+  assert.ok(rec);
+  assert.notStrictEqual(rec!.kind, 'user_turn');
+  assert.strictEqual(rec!.kind, 'agents_md');
 });

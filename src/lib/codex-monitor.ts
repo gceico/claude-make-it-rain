@@ -7,7 +7,7 @@ import type { CodexTokenTotals } from './codex-entry-parser';
 import { createTailState, tailFile } from './tail-reader';
 import type { TailState } from './tail-reader';
 import { discoverCodexFiles, resolveCodexSessionsDir } from './codex-dirs';
-import type { ModelBucket, UserTurn } from './usage-monitor';
+import type { ModelBucket, UserTurn, FileReadEvent } from './usage-monitor';
 
 /**
  * Live monitor for OpenAI Codex spend, the counterpart to lib/usage-monitor.ts.
@@ -43,6 +43,15 @@ export interface CodexSnapshot {
   perModel: Record<string, ModelBucket>;
   sessions: { count: number; maxContextTokens: number };
   userTurns: UserTurn[];
+  /** Always empty — Codex rollout logs have no Read-tool-result equivalent.
+   *  Present only so snapshot-merge.ts's `[...claude.fileReads, ...codex.fileReads]`
+   *  type-checks without a special case. */
+  fileReads: FileReadEvent[];
+  /** Largest AGENTS.md instructions block (line count) seen across today's
+   *  sessions — the block appears at most once per session (see the
+   *  agents_md CodexRecord in codex-entry-parser.ts), so a max (not an
+   *  array) is the right shape, unlike fileReads. */
+  agentsMdLines: number;
 }
 
 export function emptyCodexSnapshot(): CodexSnapshot {
@@ -55,6 +64,8 @@ export function emptyCodexSnapshot(): CodexSnapshot {
     perModel: {},
     sessions: { count: 0, maxContextTokens: 0 },
     userTurns: [],
+    fileReads: [],
+    agentsMdLines: 0,
   };
 }
 
@@ -77,6 +88,7 @@ interface CodexFileState {
   activeToday: boolean; // any today delta attributed => counts as a session
   deltaCount: number; // token_count deltas attributed to today
   userTurns: UserTurn[]; // today's user turns (length only)
+  agentsMdLines: number; // this file's AGENTS.md block line count, if any, today
 }
 
 export const zeroTotals = (): CodexTokenTotals => ({
@@ -136,6 +148,7 @@ function snapshotSignature(s: CodexSnapshot): string {
     s.sessions.count,
     s.sessions.maxContextTokens,
     s.userTurns.length,
+    s.agentsMdLines,
   ].join('|');
 }
 
@@ -238,6 +251,7 @@ export class CodexMonitor {
         activeToday: false,
         deltaCount: 0,
         userTurns: [],
+        agentsMdLines: 0,
       };
       this.fileStates.set(filePath, s);
     }
@@ -274,6 +288,19 @@ export class CodexMonitor {
           userTextLength: parsed.userTextLength,
           timestampMs: parsed.timestamp.getTime(),
         });
+        return;
+      case 'agents_md':
+        // Deliberately NOT date-gated, unlike the records above. Codex writes
+        // this block once, at session START, so a session resumed today carries
+        // yesterday's (or last month's) timestamp on it while its instructions
+        // are still loaded into every request billed today — and resumed
+        // sessions are the common case, not the exception. Date-gating it here
+        // would silently drop the signal for exactly those sessions. Safe
+        // because the file is only read at all when its mtime is recent, and
+        // _resetState() clears every CodexFileState at midnight.
+        // Appears once per session in practice; max guards a re-read after
+        // truncation from ever double-counting or shrinking the figure.
+        if (parsed.lines > s.agentsMdLines) s.agentsMdLines = parsed.lines;
         return;
       case 'token_count': {
         const d = delta(parsed.total, s.lastTotal);
@@ -342,6 +369,9 @@ export class CodexMonitor {
         snap.perModel[model] = bucket;
       }
       for (const t of s.userTurns) snap.userTurns.push(t);
+      if (s.agentsMdLines > snap.agentsMdLines) {
+        snap.agentsMdLines = s.agentsMdLines;
+      }
     }
     return snap;
   }

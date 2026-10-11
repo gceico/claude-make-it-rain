@@ -111,6 +111,24 @@ test('score: is always within [0, 100]', () => {
   assert.ok(score >= 0 && score <= 100);
 });
 
+test('score: leanInstructions covers CLAUDE.md or AGENTS.md via instructionLines (caller takes the max)', () => {
+  const snap = emptyDailySnapshot();
+  const lean = optimizationScore({
+    snapshot: snap,
+    toolingState: noTools(),
+    instructionLines: 100, // under the 200 threshold
+  });
+  const bloated = optimizationScore({
+    snapshot: snap,
+    toolingState: noTools(),
+    instructionLines: 500, // AGENTS.md (or CLAUDE.md) at/over the taper floor
+  });
+  assert.ok(
+    lean > bloated,
+    `lean instructions (${lean}) should score higher than bloated (${bloated})`
+  );
+});
+
 test('netSavings = gross - stillSpent, never negative-safe inputs crash it', () => {
   assert.strictEqual(netSavings(10, 4), 6);
   assert.strictEqual(netSavings(4, 10), -6, 'a net LOSS reads as negative');
