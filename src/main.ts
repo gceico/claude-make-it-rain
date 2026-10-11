@@ -44,8 +44,10 @@ import { UpdateChecker, shouldNotify } from './lib/update-checker';
 import { AnalyticsStore, emptyDailySnapshot } from './lib/analytics-store';
 import type { ToolingState } from './lib/analytics-store';
 import { runHabitDetectors, habitOfTheDay } from './lib/habits';
-import type { HabitInput } from './lib/habits';
+import type { HabitInput, ClaudeMdStat } from './lib/habits';
 import { optimizationScore } from './lib/score';
+import { claudeMdContextFor } from './lib/claude-md';
+import { hashProjectKey } from './lib/entry-parser';
 import {
   detectTooling,
   installPlan,
@@ -120,6 +122,9 @@ let latestSnapshot: Snapshot = {
   sessions: { count: 0, maxContextTokens: 0 },
   userTurns: [],
   sessionGaps: [],
+  fileReads: [],
+  projectDirs: [],
+  agentsMdLines: 0,
 };
 // Two independent spend sources — Claude Code and OpenAI Codex — each emit
 // their own snapshot on their own poll. We hold the latest of each and combine
@@ -367,12 +372,31 @@ function liveDailySnapshot(): import('./lib/analytics-store').DailySnapshot {
   };
 }
 
+/** Resolves each active project's effective CLAUDE.md chain and hashes the
+ *  project key before it leaves this function — the raw `projectDirs` paths
+ *  (in-memory only, see Snapshot.projectDirs) never reach habits.ts/storage. */
+function claudeMdStats(): ClaudeMdStat[] {
+  const stats: ClaudeMdStat[] = [];
+  for (const dir of latestSnapshot.projectDirs) {
+    const projectKey = hashProjectKey(dir);
+    if (!projectKey) continue;
+    stats.push({
+      projectKey,
+      totalLines: claudeMdContextFor(dir).totalLines,
+    });
+  }
+  return stats;
+}
+
 function buildHabitInput(): HabitInput {
   return {
     snapshot: liveDailySnapshot(),
     toolingState,
     userTurns: latestSnapshot.userTurns,
     sessionGaps: latestSnapshot.sessionGaps,
+    fileReads: latestSnapshot.fileReads,
+    claudeMd: claudeMdStats(),
+    agentsMd: latestSnapshot.agentsMdLines,
   };
 }
 
@@ -409,15 +433,27 @@ function habitsSubmenu(): MenuItemConstructorOptions[] {
 /** Awareness facts (model split, cache rate, Optimization Score, net saved)
  *  appended to the "See your numbers" submenu. */
 function awarenessItems(): MenuItemConstructorOptions[] {
-  const results = runHabitDetectors(buildHabitInput());
+  const habitInput = buildHabitInput();
+  const results = runHabitDetectors(habitInput);
   const byId = new Map(results.map((r) => [r.id, r]));
   const giantPasteCount = byId.get('giant-paste')?.count ?? 0;
   const staleCacheIdleCount = byId.get('stale-cache-idle')?.count ?? 0;
+  const bigFileReadCount = byId.get('big-file-reads')?.count ?? 0;
+  const claudeMdLines = habitInput.claudeMd.reduce(
+    (max, c) => Math.max(max, c.totalLines),
+    0
+  );
+  // The score's single "lean instructions" lever covers whichever coding
+  // agent's instruction file is bigger — CLAUDE.md's chain or Codex's
+  // AGENTS.md block (see score.ts's leanInstructions doc comment).
+  const instructionLines = Math.max(claudeMdLines, habitInput.agentsMd);
   const score = optimizationScore({
     snapshot: liveDailySnapshot(),
     toolingState,
     giantPasteCount,
     staleCacheIdleCount,
+    bigFileReadCount,
+    instructionLines,
   });
   const lifetime = analyticsStore ? analyticsStore.data.savings.lifetimeUSD : 0;
 

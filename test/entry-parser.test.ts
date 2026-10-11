@@ -133,6 +133,97 @@ test('malformed lines still skipped (garbage JSON, missing timestamp, bad type)'
   );
 });
 
+test('user entry: toolUseResult.file yields fileRead with numLines + ext, never the path', () => {
+  const line = JSON.stringify({
+    type: 'user',
+    timestamp: NOW_ISO,
+    sessionId: 's1',
+    message: { content: 'tool result' },
+    toolUseResult: {
+      file: {
+        filePath: '/Users/me/secret-project/src/big-module.ts',
+        content: 'const x = 1;\n'.repeat(500),
+        numLines: 500,
+        startLine: 1,
+        totalLines: 500,
+      },
+    },
+  });
+  const parsed = parseUsageEntry(line);
+  assert.ok(parsed && parsed.kind === 'user');
+  if (!parsed || parsed.kind !== 'user') throw new Error('unreachable');
+  assert.ok(parsed.fileRead);
+  assert.strictEqual(parsed.fileRead!.lines, 500);
+  assert.strictEqual(parsed.fileRead!.totalLines, 500);
+  assert.strictEqual(parsed.fileRead!.ext, '.ts');
+  assert.ok(
+    !JSON.stringify(parsed).includes('secret-project'),
+    'the raw file path must never appear on the parsed object'
+  );
+  assert.ok(
+    !JSON.stringify(parsed).includes('const x = 1'),
+    'file content must never appear on the parsed object'
+  );
+});
+
+test('user entry: a 499-line read does not look different from a 500-line one at parse time', () => {
+  // The 500-line threshold is enforced by habits.ts/usage-monitor.ts, not the
+  // parser — the parser just reports numLines as-is.
+  const line = (numLines: number) =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: NOW_ISO,
+      message: { content: 'tool result' },
+      toolUseResult: {
+        file: {
+          filePath: '/x/y.py',
+          numLines,
+          startLine: 1,
+          totalLines: numLines,
+        },
+      },
+    });
+  const p499 = parseUsageEntry(line(499));
+  const p500 = parseUsageEntry(line(500));
+  assert.ok(p499 && p499.kind === 'user' && p499.fileRead);
+  assert.ok(p500 && p500.kind === 'user' && p500.fileRead);
+  if (p499?.kind !== 'user' || p500?.kind !== 'user')
+    throw new Error('unreachable');
+  assert.strictEqual(p499.fileRead!.lines, 499);
+  assert.strictEqual(p500.fileRead!.lines, 500);
+});
+
+test('user entry: no toolUseResult.file -> fileRead is null', () => {
+  const line = JSON.stringify({
+    type: 'user',
+    timestamp: NOW_ISO,
+    message: { content: 'hi' },
+  });
+  const parsed = parseUsageEntry(line);
+  assert.ok(parsed && parsed.kind === 'user');
+  if (!parsed || parsed.kind !== 'user') throw new Error('unreachable');
+  assert.strictEqual(parsed.fileRead, null);
+});
+
+test('projectDir carries the raw cwd in-memory only, alongside the hashed projectKey', () => {
+  const line = JSON.stringify({
+    type: 'assistant',
+    timestamp: NOW_ISO,
+    requestId: 'r1',
+    cwd: '/Users/me/secret-project',
+    message: {
+      id: 'm1',
+      model: 'claude-sonnet-5',
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+  });
+  const parsed = parseUsageEntry(line);
+  assert.ok(parsed && parsed.kind === 'assistant');
+  if (!parsed || parsed.kind !== 'assistant') throw new Error('unreachable');
+  assert.strictEqual(parsed.projectDir, '/Users/me/secret-project');
+  assert.strictEqual(parsed.projectKey, hashProjectKey(parsed.projectDir));
+});
+
 test('assistant entry still returns all pre-existing fields unchanged', () => {
   const line = JSON.stringify({
     type: 'assistant',

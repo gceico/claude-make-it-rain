@@ -30,21 +30,70 @@ export interface ParsedEntry {
   sessionId: string | null;
   /** Hash of the project dir — never the raw path (see hashProjectKey). */
   projectKey: string | null;
+  /** Raw `rec.cwd`, IN-MEMORY ONLY — never persisted or transmitted. Exists
+   *  solely so a caller can locate that project's CLAUDE.md on disk; anything
+   *  that stores or reports state must use `projectKey` instead. */
+  projectDir: string | null;
+}
+
+/** A Read tool's ingested-content shape — numbers + extension only, never the
+ *  file path or its content. Parsed from the top-level
+ *  `toolUseResult.file = { filePath, content, numLines, totalLines, ... }`
+ *  Claude Code writes on the `type:"user"` line carrying a Read result. */
+export interface FileReadInfo {
+  /** Lines actually returned in this Read (`numLines`). */
+  lines: number;
+  /** Total lines in the file, for context (`totalLines`). */
+  totalLines: number;
+  /** Lowercased extension including the dot (e.g. `.ts`), or null. */
+  ext: string | null;
 }
 
 /**
  * A normalized user-turn entry. Only the summed character length of the
  * turn's text blocks is kept — the actual prompt text is discarded on
  * purpose so this can power content-shape habits (giant-paste, rage-retry)
- * without ever storing or transmitting prompt content.
+ * without ever storing or transmitting prompt content. `fileRead` similarly
+ * keeps only line counts + extension, never the file's path or content.
  */
 export interface ParsedUserEntry {
   kind: 'user';
   timestamp: Date;
   sessionId: string | null;
   projectKey: string | null;
+  /** Raw `rec.cwd`, IN-MEMORY ONLY — never persisted or transmitted. See
+   *  ParsedEntry.projectDir. */
+  projectDir: string | null;
   /** Summed character length of the turn's text blocks. */
   userTextLength: number;
+  /** Set when this user line carries a Read tool result; null otherwise. */
+  fileRead: FileReadInfo | null;
+}
+
+/** Lowercased file extension (including the dot) from a raw path, or null if
+ *  there isn't one. Only ever fed a `filePath` that is discarded immediately
+ *  afterward — the extension itself carries no path/content information. */
+function extOf(filePath: string): string | null {
+  const base = filePath.split(/[/\\]/).pop() || '';
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0) return null; // no extension, or a dotfile with none
+  return base.slice(dot).toLowerCase();
+}
+
+/** Extracts the Read-result line counts + extension from a `type:"user"`
+ *  record's top-level `toolUseResult.file`, if present. */
+function parseFileRead(rec: Record<string, unknown>): FileReadInfo | null {
+  const toolUseResult = rec.toolUseResult;
+  if (!toolUseResult || typeof toolUseResult !== 'object') return null;
+  const file = (toolUseResult as Record<string, unknown>).file;
+  if (!file || typeof file !== 'object') return null;
+  const f = file as Record<string, unknown>;
+  const filePath = typeof f.filePath === 'string' ? f.filePath : null;
+  return {
+    lines: intValue(f.numLines),
+    totalLines: intValue(f.totalLines),
+    ext: filePath ? extOf(filePath) : null,
+  };
 }
 
 /** Sum the character length of every string/`{type:'text',text}` block in a
@@ -98,9 +147,8 @@ export function parseUsageEntry(
   const timestampCandidate = new Date(rec.timestamp);
   if (isNaN(timestampCandidate.getTime())) return null;
   const sessionId = typeof rec.sessionId === 'string' ? rec.sessionId : null;
-  const projectKey = hashProjectKey(
-    typeof rec.cwd === 'string' ? rec.cwd : null
-  );
+  const projectDir = typeof rec.cwd === 'string' ? rec.cwd : null;
+  const projectKey = hashProjectKey(projectDir);
 
   if (rec.type === 'user') {
     const message = rec.message;
@@ -111,7 +159,9 @@ export function parseUsageEntry(
       timestamp: timestampCandidate,
       sessionId,
       projectKey,
+      projectDir,
       userTextLength: userTextLength(msg.content),
+      fileRead: parseFileRead(rec),
     };
   }
 
@@ -173,5 +223,6 @@ export function parseUsageEntry(
     },
     sessionId,
     projectKey,
+    projectDir,
   };
 }

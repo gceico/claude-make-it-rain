@@ -23,17 +23,28 @@ export interface ScoreWeights {
   routingSanity: number;
   noGiantPastes: number;
   lowIdleCacheWaste: number;
+  leanBigReads: number;
+  /** Lean instruction files — covers BOTH CLAUDE.md and AGENTS.md (whichever
+   *  is larger; see instructionLines below). One lever, not two: they're the
+   *  same cost driver (an instruction block re-injected into every request)
+   *  under two different coding agents' names. */
+  leanInstructions: number;
 }
 
 // Cache hit rate is the heaviest single lever (it's usually the cheapest win
 // available), followed by having the tooling actually installed/active.
+// Rebalanced (still sums to 100) to make room for the two context-hygiene
+// levers added alongside the bloated-claude-md/bloated-agents-md / big-file-reads
+// habits.
 export const DEFAULT_WEIGHTS: ScoreWeights = {
-  cacheOn: 35,
-  toolingActive: 25,
-  sessionDiscipline: 15,
-  routingSanity: 10,
-  noGiantPastes: 10,
-  lowIdleCacheWaste: 5,
+  cacheOn: 32,
+  toolingActive: 22,
+  sessionDiscipline: 13,
+  routingSanity: 9,
+  noGiantPastes: 8,
+  lowIdleCacheWaste: 4,
+  leanBigReads: 7,
+  leanInstructions: 5,
 };
 
 function clamp01(n: number): number {
@@ -66,6 +77,12 @@ export interface OptimizationScoreInput {
   giantPasteCount?: number;
   /** Count of stale-cache-idle occurrences today (from habits.ts). */
   staleCacheIdleCount?: number;
+  /** Count of 500+ line file reads today (from habits.ts's big-file-reads). */
+  bigFileReadCount?: number;
+  /** Larger of the largest active project's effective CLAUDE.md chain and
+   *  Codex's AGENTS.md block, in lines (from habits.ts's bloated-claude-md /
+   *  bloated-agents-md — caller takes the max of the two). */
+  instructionLines?: number;
 }
 
 /**
@@ -77,6 +94,8 @@ export function optimizationScore({
   toolingState,
   giantPasteCount = 0,
   staleCacheIdleCount = 0,
+  bigFileReadCount = 0,
+  instructionLines = 0,
 }: OptimizationScoreInput): number {
   const w = DEFAULT_WEIGHTS;
 
@@ -105,13 +124,24 @@ export function optimizationScore({
   // Low idle-cache waste: full marks with zero stale-cache-idle events.
   const lowIdleCacheWasteScore = clamp01(1 - staleCacheIdleCount / 3);
 
+  // Lean big reads: full marks with zero 500+ line reads, tapering off by 5.
+  const leanBigReadsScore = clamp01(1 - bigFileReadCount / 5);
+
+  // Lean instructions (CLAUDE.md or AGENTS.md, whichever is larger): full
+  // marks at/under 200 lines, 0 at 500+.
+  const leanInstructionsScore = clamp01(
+    1 - Math.max(0, instructionLines - 200) / 300
+  );
+
   const total =
     cacheOnScore * w.cacheOn +
     toolingActiveScore * w.toolingActive +
     sessionDisciplineScore * w.sessionDiscipline +
     routingSanityScore * w.routingSanity +
     noGiantPastesScore * w.noGiantPastes +
-    lowIdleCacheWasteScore * w.lowIdleCacheWaste;
+    lowIdleCacheWasteScore * w.lowIdleCacheWaste +
+    leanBigReadsScore * w.leanBigReads +
+    leanInstructionsScore * w.leanInstructions;
 
   return Math.round(clamp01(total / 100) * 100);
 }

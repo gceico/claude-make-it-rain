@@ -40,10 +40,24 @@ export interface SessionGap {
   cacheCreationTokensAfterGap: number;
 }
 
+/** One Read tool result's ingested shape — never the path or content.
+ *  Shape matches habits.ts's FileReadEvent so it feeds detectors directly. */
+export interface FileReadEvent {
+  sessionId: string | null;
+  lines: number;
+  ext: string | null;
+  timestampMs: number;
+}
+
 // Only record gaps at least this long; the authoritative stale-cache-idle
 // threshold (gap AND cache-spike size) lives in habits.ts — this is just a
 // recording bound so the array stays small.
 const GAP_RECORD_MS = 5 * 60 * 1000;
+// Only record reads at least this large; the authoritative big-file-reads
+// threshold lives in habits.ts — this is just a recording bound so the array
+// stays small (mirrors GAP_RECORD_MS above). Also shared by history.ts's
+// retroactive scan so live and historical counts use the same bound.
+export const FILE_READ_RECORD_LINES = 200;
 
 /** Today's running spend + token totals. */
 export interface Snapshot {
@@ -60,6 +74,17 @@ export interface Snapshot {
   userTurns: UserTurn[];
   /** Today's >5min-then-cache-rebuild gaps — stale-cache-idle habit. */
   sessionGaps: SessionGap[];
+  /** Today's Read results of >= FILE_READ_RECORD_LINES — big-file-reads habit. */
+  fileReads: FileReadEvent[];
+  /** Distinct raw project dirs (`cwd`) seen today. IN-MEMORY ONLY — never
+   *  persisted or transmitted; consumers must hash each entry with
+   *  hashProjectKey() before it leaves this monitor (see main.ts). */
+  projectDirs: string[];
+  /** Always 0 for Claude Code — AGENTS.md is a Codex concept (see
+   *  CodexSnapshot.agentsMdLines / snapshot-merge.ts). Present only so
+   *  main.ts's bloated-agents-md wiring has one field to read regardless of
+   *  which monitor produced the combined snapshot. */
+  agentsMdLines: number;
 }
 
 export interface UsageMonitorOptions {
@@ -95,6 +120,9 @@ export class UsageMonitor {
   currentDayStart!: Date;
   // sessionId -> last assistant timestamp seen today (for gap detection).
   sessionLastTs!: Map<string, number>;
+  // O(1) membership check backing snapshot.projectDirs (kept in sync as an
+  // array there since consumers just want to iterate it).
+  _projectDirsSeen!: Set<string>;
 
   constructor({
     projectsDir,
@@ -129,8 +157,12 @@ export class UsageMonitor {
       sessions: { count: 0, maxContextTokens: 0 },
       userTurns: [],
       sessionGaps: [],
+      fileReads: [],
+      projectDirs: [],
+      agentsMdLines: 0,
     };
     this.sessionLastTs = new Map();
+    this._projectDirsSeen = new Set();
     this.currentDayStart = UsageMonitor.startOfToday();
   }
 
@@ -248,6 +280,14 @@ export class UsageMonitor {
     // rare race right at midnight rollover).
     if (timestamp.getTime() < this.currentDayStart.getTime()) return;
 
+    // Distinct raw project dirs seen today, for the bloated-claude-md habit
+    // (main.ts resolves + hashes each before it reaches habits.ts/storage —
+    // see Snapshot.projectDirs). Recorded for both entry kinds.
+    if (parsed.projectDir && !this._projectDirsSeen.has(parsed.projectDir)) {
+      this._projectDirsSeen.add(parsed.projectDir);
+      this.snapshot.projectDirs.push(parsed.projectDir);
+    }
+
     // User turns: record text LENGTH + session + time only (giant-paste /
     // rage-retry). ponytail: no dedup key on user lines, so a truncation/
     // re-read can double-count a turn — rare, and both detectors are
@@ -259,6 +299,14 @@ export class UsageMonitor {
         userTextLength: parsed.userTextLength,
         timestampMs: timestamp.getTime(),
       });
+      if (parsed.fileRead && parsed.fileRead.lines >= FILE_READ_RECORD_LINES) {
+        this.snapshot.fileReads.push({
+          sessionId: parsed.sessionId,
+          lines: parsed.fileRead.lines,
+          ext: parsed.fileRead.ext,
+          timestampMs: timestamp.getTime(),
+        });
+      }
       return;
     }
 

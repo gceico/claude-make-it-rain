@@ -14,6 +14,8 @@ import { discoverCodexFilesAsync, resolveCodexSessionsDir } from './codex-dirs';
 import { AnalyticsStore, emptyDailySnapshot } from './analytics-store';
 import type { DailySnapshot, ToolingState } from './analytics-store';
 import { runHabitDetectors } from './habits';
+import { FILE_READ_RECORD_LINES } from './usage-monitor';
+import type { FileReadEvent } from './usage-monitor';
 import {
   allProjectsDirs,
   defaultProjectsDir,
@@ -54,6 +56,11 @@ export interface DayBucket {
   /** sessionId -> max input+cache tokens seen in one assistant entry of that
    *  session, on this day — a proxy for that session's peak context size. */
   sessionMaxContext: Map<string, number>;
+  /** This day's Read results of >= FILE_READ_RECORD_LINES — big-file-reads
+   *  habit. Unlike giant-paste/rage-retry, this signal survives the history
+   *  scan (it's derived from the same assistant/user-line pass, not retained
+   *  full user-turn text), so historical days get a real habitCounts figure. */
+  fileReads: FileReadEvent[];
 }
 
 /** A per-day entry in an assembled range result. */
@@ -200,6 +207,7 @@ function emptyBucket(): DayBucket {
     cacheReadTok: 0,
     cacheCreationTok: 0,
     sessionMaxContext: new Map(),
+    fileReads: [],
   };
 }
 
@@ -220,6 +228,7 @@ function mergeDayBucket(dst: DayBucket, src: DayBucket): void {
     const prev = dst.sessionMaxContext.get(sid) || 0;
     if (ctx > prev) dst.sessionMaxContext.set(sid, ctx);
   }
+  dst.fileReads.push(...src.fileReads);
 }
 
 /** Folds a Codex day map into a Claude day map (mutating `into`). */
@@ -379,7 +388,27 @@ async function scanWindow({
     for (const line of content.split('\n')) {
       if (!line) continue;
       const parsed = parseUsageEntry(line);
-      if (!parsed || parsed.kind !== 'assistant') continue;
+      if (!parsed) continue;
+
+      // Read-result line counts survive the history scan (unlike full user-turn
+      // text, kept only live) — feeds big-file-reads' real historical counts.
+      if (parsed.kind === 'user') {
+        if (!parsed.fileRead || parsed.fileRead.lines < FILE_READ_RECORD_LINES)
+          continue;
+        const t = parsed.timestamp.getTime();
+        if (t < startMs || t >= endMs) continue;
+        const key = dayKey(parsed.timestamp);
+        const bucket = days.get(key) || emptyBucket();
+        bucket.fileReads.push({
+          sessionId: parsed.sessionId,
+          lines: parsed.fileRead.lines,
+          ext: parsed.fileRead.ext,
+          timestampMs: t,
+        });
+        days.set(key, bucket);
+        continue;
+      }
+      if (parsed.kind !== 'assistant') continue;
 
       const t = parsed.timestamp.getTime();
       if (t < startMs || t >= endMs) continue;
@@ -457,9 +486,11 @@ const ALL_TOOLS_INSTALLED: ToolingState = {
 
 /** Converts one scan's DayBucket into the analytics-store's persisted
  *  DailySnapshot shape, including per-day habitCounts derived from that day's
- *  token/model/cache/session data (content-shape habits like giant-paste need
- *  user-turn data the history scan doesn't retain, so they stay 0 in history
- *  and are only counted live). */
+ *  token/model/cache/session/file-read data. Habits that need full user-turn
+ *  TEXT (giant-paste, rage-retry) stay 0 in history — that content is only
+ *  retained live — but big-file-reads only needs the Read result's line
+ *  count, which the scan does retain, so it gets real historical counts.
+ *  bloated-claude-md stays live-only regardless (see ALL_TOOLS_INSTALLED). */
 function dailySnapshotFromBucket(bucket: DayBucket): DailySnapshot {
   const snap = emptyDailySnapshot();
   snap.costUSD = bucket.costUSD;
@@ -489,6 +520,12 @@ function dailySnapshotFromBucket(bucket: DayBucket): DailySnapshot {
     toolingState: ALL_TOOLS_INSTALLED,
     userTurns: [],
     sessionGaps: [],
+    fileReads: bucket.fileReads,
+    // bloated-claude-md / bloated-agents-md stay live-only, same reasoning as
+    // tool-missing above: today's CLAUDE.md/AGENTS.md says nothing about what
+    // it looked like historically.
+    claudeMd: [],
+    agentsMd: 0,
   })) {
     if (r.count > 0) snap.habitCounts[r.id] = r.count;
   }

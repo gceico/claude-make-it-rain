@@ -19,9 +19,20 @@ import type { CodexSnapshot } from './codex-monitor';
  *  - Codex's cached-input feeds the combined cache-read total (Codex has no
  *    cache-*creation* concept);
  *  - user turns concatenate (giant-paste / rage-retry habits apply to both);
+ *  - `fileReads` concatenates too — Codex always contributes an empty array
+ *    (its rollout logs have no Read-tool-result equivalent), so this is a
+ *    no-op for Codex but keeps big-file-reads correct for Claude;
  *  - `sessionGaps` stays Claude-only: the stale-cache-idle detector keys off a
  *    >5min gap followed by a cache-*creation* spike, which Codex never emits, so
- *    that one habit simply never counts Codex sessions.
+ *    that one habit simply never counts Codex sessions;
+ *  - `projectDirs` stays Claude-only too, same reasoning: it exists solely to
+ *    resolve CLAUDE.md chains for the bloated-claude-md habit, a Claude Code
+ *    concept Codex has no equivalent of;
+ *  - `agentsMdLines` is the mirror image: Claude always contributes 0 (no
+ *    AGENTS.md concept), so the merged value is simply codex.agentsMdLines —
+ *    Codex writes the exact instructions block it loaded straight into the
+ *    transcript (see codex-entry-parser.ts's agents_md record), so unlike
+ *    CLAUDE.md this needs no disk read/resolution step at all.
  */
 export function mergeSnapshots(
   claude: Snapshot,
@@ -63,7 +74,11 @@ export function mergeSnapshots(
       ),
     },
     userTurns: [...claude.userTurns, ...codex.userTurns],
+    fileReads: [...claude.fileReads, ...codex.fileReads],
     // Claude-only — see the doc comment above.
     sessionGaps: claude.sessionGaps,
+    projectDirs: claude.projectDirs,
+    // Codex-only, mirror image of projectDirs/sessionGaps — see doc comment.
+    agentsMdLines: codex.agentsMdLines,
   };
 }

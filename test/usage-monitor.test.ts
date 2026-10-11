@@ -622,6 +622,22 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
       sessionId,
       message: { content: text },
     });
+  const readLine = (sessionId: string, tsOffset: number, numLines: number) =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: iso(tsOffset),
+      sessionId,
+      message: { content: 'tool result' },
+      toolUseResult: {
+        file: {
+          filePath: '/Users/me/proj/big.ts',
+          content: 'x',
+          numLines,
+          startLine: 1,
+          totalLines: numLines,
+        },
+      },
+    });
 
   fs.writeFileSync(
     path.join(pd, 's.jsonl'),
@@ -630,6 +646,8 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
       userLine('s1', -600_000, 'x'.repeat(25_000)),
       // long session: >150k context (input + cache read) in s1
       assistant('s1', -590_000, 'a1', 160_000, 20_000, 5_000),
+      // big-file-reads: a 500+ line Read result in s1
+      readLine('s1', -580_000, 1200),
       // >5min gap within s1 followed by a cache-creation spike (stale-cache-idle)
       assistant('s1', -100_000, 'a2', 100, 0, 30_000),
       // second distinct session for sessions.count == 2
@@ -647,7 +665,9 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
   m.tick(true);
   const snap = m.snapshot;
 
-  assert.strictEqual(snap.userTurns.length, 4, 'all user turns recorded');
+  assert.strictEqual(snap.userTurns.length, 5, 'all user turns recorded');
+  assert.strictEqual(snap.fileReads.length, 1, 'the 500+ line read recorded');
+  assert.strictEqual(snap.fileReads[0]!.lines, 1200);
   assert.strictEqual(snap.sessions.count, 2, 'two distinct sessions');
   assert.ok(
     snap.sessions.maxContextTokens >= 150_000,
@@ -676,12 +696,18 @@ test('accumulates userTurns / sessions / sessionGaps and detectors fire live', a
     },
     userTurns: snap.userTurns,
     sessionGaps: snap.sessionGaps,
+    fileReads: snap.fileReads,
+    claudeMd: [{ projectKey: 'p1', totalLines: 250 }],
+    agentsMd: 250,
   });
   const fired = new Set(results.filter((r) => r.triggered).map((r) => r.id));
   assert.ok(fired.has('giant-paste'), 'giant-paste fires live');
   assert.ok(fired.has('rage-retry'), 'rage-retry fires live');
   assert.ok(fired.has('long-sessions'), 'long-sessions fires live');
   assert.ok(fired.has('stale-cache-idle'), 'stale-cache-idle fires live');
+  assert.ok(fired.has('bloated-claude-md'), 'bloated-claude-md fires live');
+  assert.ok(fired.has('bloated-agents-md'), 'bloated-agents-md fires live');
+  assert.ok(fired.has('big-file-reads'), 'big-file-reads fires live');
 });
 
 // ── Cowork (Claude Desktop local agent mode) sandboxed HOMEs ───────────────

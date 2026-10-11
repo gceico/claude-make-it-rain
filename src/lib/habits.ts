@@ -34,12 +34,36 @@ export interface SessionGapEvent {
   cacheCreationTokensAfterGap: number;
 }
 
+/** One Read tool result's ingested shape — line counts + extension only,
+ *  never the file path or its content. */
+export interface FileReadEvent {
+  sessionId: string | null;
+  lines: number;
+  ext: string | null;
+  timestampMs: number;
+}
+
+/** One active project's effective CLAUDE.md chain size. `projectKey` is
+ *  already the hashed form (see entry-parser.ts's hashProjectKey) — the raw
+ *  project path never reaches this module. */
+export interface ClaudeMdStat {
+  projectKey: string;
+  totalLines: number;
+}
+
 /** Everything a detector needs, all already privacy-safe/local aggregates. */
 export interface HabitInput {
   snapshot: DailySnapshot;
   toolingState: ToolingState;
   userTurns: UserTurnEvent[];
   sessionGaps: SessionGapEvent[];
+  fileReads: FileReadEvent[];
+  claudeMd: ClaudeMdStat[];
+  /** Largest AGENTS.md instructions block Codex loaded today, in lines (0 if
+   *  none). Unlike claudeMd this is a single number, not per-project — Codex
+   *  writes the exact block it loaded straight into the transcript, so it
+   *  needs no disk resolution (see codex-monitor.ts's agentsMdLines). */
+  agentsMd: number;
 }
 
 export interface HabitResult {
@@ -65,9 +89,16 @@ const GIANT_PASTE_CHARS = 20_000; // ~a very large single paste
 const RAGE_RETRY_WINDOW_MS = 3 * 60 * 1000;
 const RAGE_RETRY_MIN_COUNT = 3;
 const RAGE_RETRY_SIZE_TOLERANCE = 0.2; // ±20% counts as "similar size"
+const BLOATED_INSTRUCTIONS_LINES = 200; // community guideline for lean CLAUDE.md/AGENTS.md
+const BIG_FILE_READ_LINES = 500; // a single Read this big rides along every turn
 
 function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
+}
+
+/** `1234` -> `'1.2k'`, `120` -> `'120'` — matches the plan's coach copy. */
+function formatLines(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
 }
 
 function totalOutputTokens(snapshot: DailySnapshot): number {
@@ -242,6 +273,52 @@ export const rageRetry: HabitDetector = ({ userTurns }) => {
   };
 };
 
+export const bloatedClaudeMd: HabitDetector = ({ claudeMd }) => {
+  const hits = claudeMd.filter(
+    (c) => c.totalLines > BLOATED_INSTRUCTIONS_LINES
+  );
+  const biggest = hits.reduce((max, c) => Math.max(max, c.totalLines), 0);
+  const largest = claudeMd.reduce((max, c) => Math.max(max, c.totalLines), 0);
+  return {
+    id: 'bloated-claude-md',
+    severity: 'medium',
+    triggered: hits.length > 0,
+    count: hits.length,
+    coachCopy:
+      hits.length > 0
+        ? `Your CLAUDE.md chain loads ${biggest} lines into every request`
+        : `CLAUDE.md context is lean (${largest} lines).`,
+  };
+};
+
+export const bloatedAgentsMd: HabitDetector = ({ agentsMd }) => {
+  const triggered = agentsMd > BLOATED_INSTRUCTIONS_LINES;
+  return {
+    id: 'bloated-agents-md',
+    severity: 'medium',
+    triggered,
+    count: triggered ? 1 : 0,
+    coachCopy: triggered
+      ? `Codex loads ${agentsMd} lines of AGENTS.md into every request`
+      : `AGENTS.md context is lean (${agentsMd} lines).`,
+  };
+};
+
+export const bigFileReads: HabitDetector = ({ fileReads }) => {
+  const hits = fileReads.filter((f) => f.lines >= BIG_FILE_READ_LINES);
+  const biggest = hits.reduce((max, f) => Math.max(max, f.lines), 0);
+  return {
+    id: 'big-file-reads',
+    severity: 'medium',
+    triggered: hits.length > 0,
+    count: hits.length,
+    coachCopy:
+      hits.length > 0
+        ? `${hits.length} file read${hits.length === 1 ? '' : 's'} pulled in 500+ lines (biggest: ${formatLines(biggest)})`
+        : 'No oversized file reads today.',
+  };
+};
+
 // ── Detectors: always-on awareness facts (never "bad") ──────────────────────
 
 export const modelSplit: HabitDetector = ({ snapshot }) => {
@@ -299,6 +376,9 @@ export const ALL_DETECTORS: HabitDetector[] = [
   ponytailMissing,
   giantPaste,
   rageRetry,
+  bloatedClaudeMd,
+  bloatedAgentsMd,
+  bigFileReads,
   modelSplit,
   cacheRate,
   estimateAccuracy,
