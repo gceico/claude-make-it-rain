@@ -2,15 +2,19 @@
 
 import { test } from 'bun:test';
 import assert from 'node:assert';
+import * as path from 'path';
 import { claudeMdContextFor, clearClaudeMdCache } from '../src/lib/claude-md';
 
+// Keys are written POSIX-style; normalize both sides with path.resolve so the
+// fake matches on Windows too (where '/proj' resolves to 'D:\\proj').
 function fakeFs(files: Record<string, string>) {
+  const byPath = new Map(
+    Object.entries(files).map(([k, v]) => [path.resolve(k), v])
+  );
   const readFile = (absPath: string): string | null =>
-    Object.prototype.hasOwnProperty.call(files, absPath)
-      ? files[absPath]!
-      : null;
+    byPath.get(path.resolve(absPath)) ?? null;
   const statMtimeMs = (absPath: string): number | null =>
-    Object.prototype.hasOwnProperty.call(files, absPath) ? 1 : null;
+    byPath.has(path.resolve(absPath)) ? 1 : null;
   return { readFile, statMtimeMs };
 }
 
@@ -130,10 +134,11 @@ test('memoizes per cwd until a resolved file mtime changes', () => {
   clearClaudeMdCache();
   let mtime = 1;
   const content = { current: 'a\nb\n' };
+  const globalMd = path.resolve('/home/u7/.claude/CLAUDE.md');
   const readFile = (absPath: string): string | null =>
-    absPath === '/home/u7/.claude/CLAUDE.md' ? content.current : null;
+    path.resolve(absPath) === globalMd ? content.current : null;
   const statMtimeMs = (absPath: string): number | null =>
-    absPath === '/home/u7/.claude/CLAUDE.md' ? mtime : null;
+    path.resolve(absPath) === globalMd ? mtime : null;
 
   const first = claudeMdContextFor('/proj/missing-7', {
     homeDir: '/home/u7',
