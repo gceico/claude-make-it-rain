@@ -70,7 +70,9 @@ interface CodexFileState {
   model: string | null; // latest turn_context model
   sessionId: string | null; // from session_meta
   lastTotal: CodexTokenTotals; // last cumulative reading (zeros initially)
-  perModel: Map<string, CodexTokenTotals>; // today's attributed deltas per model
+  // today's attributed deltas per model, plus their cost — priced per delta
+  // (one request each) so long-context tiers see the request's own prompt
+  perModel: Map<string, CodexTokenTotals & { costUSD: number }>;
   maxContextTokens: number; // peak per-request prompt size seen today
   activeToday: boolean; // any today delta attributed => counts as a session
   deltaCount: number; // token_count deltas attributed to today
@@ -80,6 +82,7 @@ interface CodexFileState {
 export const zeroTotals = (): CodexTokenTotals => ({
   inputTokens: 0,
   cachedInputTokens: 0,
+  cacheWriteInputTokens: 0,
   outputTokens: 0,
 });
 
@@ -91,20 +94,33 @@ export function delta(
   return {
     inputTokens: Math.max(0, a.inputTokens - b.inputTokens),
     cachedInputTokens: Math.max(0, a.cachedInputTokens - b.cachedInputTokens),
+    cacheWriteInputTokens: Math.max(
+      0,
+      a.cacheWriteInputTokens - b.cacheWriteInputTokens
+    ),
     outputTokens: Math.max(0, a.outputTokens - b.outputTokens),
   };
 }
 
-/** Codex token totals → the Usage shape costForEntry expects. Cached input is
- *  priced at the cache-read (10%) tier; non-cached input at the input rate;
- *  Codex has no cache-creation writes. */
-export function mapCodexUsage(t: CodexTokenTotals): Usage {
+/** Codex token totals → the Usage shape costForEntry expects. Codex's
+ *  `input_tokens` includes both the cached (read) and cache-write subsets, so
+ *  the remainder is plain input; writes bill at the 1.25x cache-write rate.
+ *  `promptTokens` is the request's own prompt size (last_token_usage), used
+ *  for long-context tiers when the delta may span more than one request. */
+export function mapCodexUsage(
+  t: CodexTokenTotals,
+  promptTokens?: number
+): Usage {
   return {
-    inputTokens: Math.max(0, t.inputTokens - t.cachedInputTokens),
+    inputTokens: Math.max(
+      0,
+      t.inputTokens - t.cachedInputTokens - t.cacheWriteInputTokens
+    ),
     outputTokens: t.outputTokens,
     cacheReadInputTokens: t.cachedInputTokens,
-    cacheCreationInputTokens: 0,
+    cacheCreationInputTokens: t.cacheWriteInputTokens,
     cacheCreationBreakdown: null,
+    promptTokens: promptTokens || undefined,
   };
 }
 
@@ -268,10 +284,19 @@ export class CodexMonitor {
         if (!this.isToday(parsed.timestamp)) return;
 
         const modelKey = s.model || 'unknown';
-        const bucket = s.perModel.get(modelKey) || zeroTotals();
+        const bucket = s.perModel.get(modelKey) || {
+          ...zeroTotals(),
+          costUSD: 0,
+        };
         bucket.inputTokens += d.inputTokens;
         bucket.cachedInputTokens += d.cachedInputTokens;
+        bucket.cacheWriteInputTokens += d.cacheWriteInputTokens;
         bucket.outputTokens += d.outputTokens;
+        bucket.costUSD += costForEntry(
+          mapCodexUsage(d, parsed.contextTokens),
+          s.model,
+          pricingForCodexModel
+        );
         s.perModel.set(modelKey, bucket);
 
         if (parsed.contextTokens > s.maxContextTokens) {
@@ -296,11 +321,7 @@ export class CodexMonitor {
         }
       }
       for (const [model, cum] of s.perModel) {
-        const cost = costForEntry(
-          mapCodexUsage(cum),
-          model,
-          pricingForCodexModel
-        );
+        const cost = cum.costUSD;
         const nonCachedInput = Math.max(
           0,
           cum.inputTokens - cum.cachedInputTokens

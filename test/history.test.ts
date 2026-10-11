@@ -47,7 +47,7 @@ function entry({
   reqId,
   msgId,
   inputM = 1,
-  model = 'claude-sonnet-5',
+  model = 'claude-sonnet-4-6',
   type = 'assistant',
 }: EntryArgs): string {
   return JSON.stringify({
@@ -219,7 +219,12 @@ test('mtime skip optimization', async () => {
 });
 
 test('History cache: same promise within TTL, force bypasses', async () => {
-  const h = new History({ projectsDir, cacheTtlMs: 10_000 });
+  const h = new History({
+    projectsDir,
+    coworkSessionsDir: null,
+    codexSessionsDir: null,
+    cacheTtlMs: 10_000,
+  });
   const p1 = h.get('today', { now: NOW });
   const p2 = h.get('today', { now: NOW });
   assert.strictEqual(p1, p2, 'cached range returns the same in-flight promise');
@@ -246,7 +251,12 @@ test('immutable past-days ledger (only today re-read on refresh)', async () => {
   };
 
   try {
-    const h2 = new History({ projectsDir, cacheTtlMs: 10_000 });
+    const h2 = new History({
+      projectsDir,
+      coworkSessionsDir: null,
+      codexSessionsDir: null,
+      cacheTtlMs: 10_000,
+    });
     const first = await h2.get('last7days', { now: NOW });
     approx(
       first.totalCostUSD,
@@ -331,7 +341,7 @@ test('ledger write populates per-day habitCounts and they sum across days', asyn
       sessionId: sess,
       message: {
         id: reqId + 'm',
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-4-6',
         usage: { input_tokens: 200_000, output_tokens: 0 },
       },
     });
@@ -344,6 +354,8 @@ test('ledger write populates per-day habitCounts and they sum across days', asyn
   const store = new AnalyticsStore(storeFile);
   const h = new History({
     projectsDir: path.join(tmpRoot, 'projects-habitcounts'),
+    coworkSessionsDir: null,
+    codexSessionsDir: null,
     cacheTtlMs: 10_000,
     analyticsStore: store,
   });

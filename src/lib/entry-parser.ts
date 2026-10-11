@@ -169,6 +169,7 @@ export function parseUsageEntry(
       cacheReadInputTokens,
       cacheCreationInputTokens,
       cacheCreationBreakdown,
+      speed: typeof u.speed === 'string' ? u.speed : null,
     },
     sessionId,
     projectKey,

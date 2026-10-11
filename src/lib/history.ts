@@ -294,7 +294,7 @@ async function scanCodexWindow(
       const t = rec.timestamp.getTime();
       if (t < startMs || t >= endMs) continue;
 
-      const usage = mapCodexUsage(delta);
+      const usage = mapCodexUsage(delta, rec.contextTokens);
       const cost = costForEntry(usage, model, pricingForCodexModel);
       const key = dayKey(rec.timestamp);
       const bucket = days.get(key) || emptyBucket();
