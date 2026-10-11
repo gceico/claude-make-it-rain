@@ -115,7 +115,7 @@ MIR_TEST_STACK=5 bun start                # burst 5 money stacks
 MIR_TEST_SHOT=/tmp/overlay.png bun start  # screenshot the overlay
 ```
 
-Architecture notes live in [CLAUDE.md](CLAUDE.md) and
+Architecture notes live in [AGENTS.md](AGENTS.md) and
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Releasing (maintainers)

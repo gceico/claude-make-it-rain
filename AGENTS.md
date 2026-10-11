@@ -1,4 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
+
+Project instructions for coding agents. Codex and Claude Code (v2.1.277+) both
+read this file directly; there is deliberately no `CLAUDE.md` — adding one
+would make Claude Code read it _instead of_ this file.
 
 ## Overview
 
