@@ -164,3 +164,35 @@ test('memoizes per cwd until a resolved file mtime changes', () => {
   });
   assert.strictEqual(fresh.totalLines, 4, 'recomputed after mtime change');
 });
+
+test('with no project CLAUDE.md, AGENTS.md is read instead (global still counts)', () => {
+  clearClaudeMdCache();
+  const { readFile, statMtimeMs } = fakeFs({
+    '/home/u9/.claude/CLAUDE.md': 'g\n', // 1 line, doesn't block AGENTS.md
+    '/repo9/AGENTS.md': 'a\nb\nc\n', // 3 lines
+    '/repo9/.claude/AGENTS.md': 'x\n', // 1 line
+  });
+  const ctx = claudeMdContextFor('/repo9/src', {
+    homeDir: '/home/u9',
+    readFile,
+    statMtimeMs,
+  });
+  assert.strictEqual(ctx.totalLines, 5);
+  assert.strictEqual(ctx.fileCount, 3);
+});
+
+test('a project CLAUDE.md or CLAUDE.local.md anywhere up the tree wins over AGENTS.md', () => {
+  clearClaudeMdCache();
+  const { readFile, statMtimeMs } = fakeFs({
+    '/repo10/AGENTS.md': 'a\nb\nc\nd\n',
+    '/repo10/CLAUDE.md': '1\n', // 1 line
+    '/repo10/sub/CLAUDE.local.md': '2\n3\n', // 2 lines, counted too
+  });
+  const ctx = claudeMdContextFor('/repo10/sub', {
+    homeDir: '/home/u10',
+    readFile,
+    statMtimeMs,
+  });
+  assert.strictEqual(ctx.totalLines, 3);
+  assert.strictEqual(ctx.fileCount, 2);
+});

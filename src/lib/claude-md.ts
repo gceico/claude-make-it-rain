@@ -12,9 +12,11 @@ import * as os from 'os';
  *
  * Mirrors the resolution order Claude Code itself uses:
  *   1. `~/.claude/CLAUDE.md` (the global memory file)
- *   2. walking from `cwd` up to the filesystem root, checking `CLAUDE.md` and
- *      `.claude/CLAUDE.md` at each level
- *   3. `@relative/path` imports referenced inside any of the above, resolved
+ *   2. walking from `cwd` up to the filesystem root, checking `CLAUDE.md`,
+ *      `.claude/CLAUDE.md` and `CLAUDE.local.md` at each level
+ *   3. when step 2 finds none of those, `AGENTS.md` / `.claude/AGENTS.md` at
+ *      each level instead (Claude Code v2.1.277+ reads AGENTS.md natively)
+ *   4. `@relative/path` imports referenced inside any of the above, resolved
  *      recursively (depth-limited, cycle-guarded)
  *
  * This is a best-effort local heuristic, not a guarantee of what any given
@@ -178,28 +180,27 @@ export function claudeMdContextFor(
     homeDir
   );
 
-  // 2. Walk cwd -> filesystem root, checking both conventional locations.
-  let dir = path.resolve(cwd);
-  for (;;) {
-    resolveFile(
-      path.join(dir, 'CLAUDE.md'),
-      0,
-      visited,
-      readFile,
-      acc,
-      homeDir
-    );
-    resolveFile(
-      path.join(dir, '.claude', 'CLAUDE.md'),
-      0,
-      visited,
-      readFile,
-      acc,
-      homeDir
-    );
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+  // 2. Walk cwd -> filesystem root for project instruction files.
+  const dirs: string[] = [];
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    dirs.push(dir);
+    if (path.dirname(dir) === dir) break;
+  }
+  const before = acc.fileCount;
+  for (const dir of dirs) {
+    for (const name of ['CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md']) {
+      resolveFile(path.join(dir, name), 0, visited, readFile, acc, homeDir);
+    }
+  }
+  // 3. Claude Code reads AGENTS.md in place of CLAUDE.md when no project
+  //    CLAUDE.md / CLAUDE.local.md exists anywhere up the tree (the global
+  //    ~/.claude/CLAUDE.md doesn't count for that check).
+  if (acc.fileCount === before) {
+    for (const dir of dirs) {
+      for (const name of ['AGENTS.md', '.claude/AGENTS.md']) {
+        resolveFile(path.join(dir, name), 0, visited, readFile, acc, homeDir);
+      }
+    }
   }
 
   const files = [...visited];
